@@ -17,12 +17,12 @@ DO NOT MODIFIY - GENERATED CODE
   <artifactId>jruby-stdlib</artifactId>
   <name>JRuby Lib Setup</name>
   <properties>
+    <jruby.complete.home>${project.build.outputDirectory}/META-INF/jruby.home</jruby.complete.home>
     <polyglot.dump.readonly>true</polyglot.dump.readonly>
     <jruby.complete.gems>${jruby.complete.home}/lib/ruby/gems/shared</jruby.complete.gems>
+    <polyglot.dump.pom>pom.xml</polyglot.dump.pom>
     <gem.home>${basedir}/ruby/gems/shared</gem.home>
     <jruby.plugins.version>1.1.2</jruby.plugins.version>
-    <polyglot.dump.pom>pom.xml</polyglot.dump.pom>
-    <jruby.complete.home>${project.build.outputDirectory}/META-INF/jruby.home</jruby.complete.home>
   </properties>
   <dependencies>
     <dependency>
@@ -207,12 +207,24 @@ DO NOT MODIFIY - GENERATED CODE
       <url>mavengem:https://rubygems.org</url>
     </repository>
   </repositories>
+  <pluginRepositories>
+    <pluginRepository>
+      <releases>
+        <enabled>false</enabled>
+      </releases>
+      <snapshots>
+        <enabled>true</enabled>
+      </snapshots>
+      <id>takari</id>
+      <url>https://otto.takari.io/content/repositories/snapshots</url>
+    </pluginRepository>
+  </pluginRepositories>
   <build>
     <extensions>
       <extension>
         <groupId>org.torquebox.mojo</groupId>
         <artifactId>mavengem-wagon</artifactId>
-        <version>0.2.0</version>
+        <version>0.2.2-SNAPSHOT</version>
       </extension>
     </extensions>
     <resources>
@@ -313,7 +325,7 @@ DO NOT MODIFIY - GENERATED CODE
       <plugin>
         <groupId>io.takari.polyglot</groupId>
         <artifactId>polyglot-maven-plugin</artifactId>
-        <version>0.1.15</version>
+        <version>0.1.20-SNAPSHOT</version>
         <executions>
           <execution>
             <id>install_gems</id>
@@ -364,7 +376,7 @@ DO NOT MODIFIY - GENERATED CODE
           <dependency>
             <groupId>io.takari.polyglot</groupId>
             <artifactId>polyglot-ruby</artifactId>
-            <version>0.1.15</version>
+            <version>0.1.20-SNAPSHOT</version>
           </dependency>
         </dependencies>
       </plugin>
