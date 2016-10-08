@@ -15,6 +15,8 @@ project 'JRuby Core' do
 
               'unsafe.version' => '8.92.1',
               'unsafe.jar' => '${settings.localRepository}/com/headius/unsafe-mock/${unsafe.version}/unsafe-mock-${unsafe.version}.jar',
+              # can not test on jdk9 with profile activation so use jdk9 as default
+              'bootclasspath' => '-Xbootclasspath/p:${unsafe.jar}',
 
               'maven.build.timestamp.format' => 'yyyy-MM-dd',
               'maven.test.skip' => 'true',
@@ -192,8 +194,7 @@ project 'JRuby Core' do
                    'compilerArgs' => [ '-XDignore.symbol.file=true',
                                        '-J-Duser.language=en',
                                        '-J-Dfile.encoding=UTF-8',
-                                       '-J-Xbootclasspath/p:${unsafe.jar}',
-                                       '-Xbootclasspath/p:${unsafe.jar}',
+                                       '${bootclasspath}',
                                        '-J-Xmx${jruby.compile.memory}' ] )
     execute_goals( 'compile',
                    :id => 'populators',
@@ -201,8 +202,7 @@ project 'JRuby Core' do
                    'compilerArgs' => [ '-XDignore.symbol.file=true',
                                        '-J-Duser.language=en',
                                        '-J-Dfile.encoding=UTF-8',
-                                       '-J-Xbootclasspath/p:${unsafe.jar}',
-                                       '-Xbootclasspath/p:${unsafe.jar}',
+                                       '${bootclasspath}',
                                        '-J-Xmx${jruby.compile.memory}' ],
                    'includes' => [ 'org/jruby/gen/**/*.java' ] )
     execute_goals( 'compile',
@@ -386,6 +386,14 @@ project 'JRuby Core' do
                      'quiet' =>  'true' )
     end
 
+  end
+
+  profile 'bootclasspath' do
+    activation do
+      jdk '1.8'
+    end
+
+    properties 'bootclasspath': '-J-Xbootclasspath/p:${unsafe.jar}'
   end
 
   profile 'tzdata' do

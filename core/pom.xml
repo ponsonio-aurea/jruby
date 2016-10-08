@@ -51,6 +51,7 @@ DO NOT MODIFIY - GENERATED CODE
     <rubyspec.dir>${spec.dir}/ruby</rubyspec.dir>
     <version.ruby.revision>54768</version.ruby.revision>
     <jruby.test.memory>3G</jruby.test.memory>
+    <bootclasspath>-Xbootclasspath/p:${unsafe.jar}</bootclasspath>
     <mspec.dir>${spec.dir}/mspec</mspec.dir>
     <build.date>${maven.build.timestamp}</build.date>
     <main.basedir>${project.parent.basedir}</main.basedir>
@@ -496,8 +497,7 @@ DO NOT MODIFIY - GENERATED CODE
                 <compilerArg>-XDignore.symbol.file=true</compilerArg>
                 <compilerArg>-J-Duser.language=en</compilerArg>
                 <compilerArg>-J-Dfile.encoding=UTF-8</compilerArg>
-                <compilerArg>-J-Xbootclasspath/p:${unsafe.jar}</compilerArg>
-                <compilerArg>-Xbootclasspath/p:${unsafe.jar}</compilerArg>
+                <compilerArg>${bootclasspath}</compilerArg>
                 <compilerArg>-J-Xmx${jruby.compile.memory}</compilerArg>
               </compilerArgs>
             </configuration>
@@ -513,8 +513,7 @@ DO NOT MODIFIY - GENERATED CODE
                 <compilerArg>-XDignore.symbol.file=true</compilerArg>
                 <compilerArg>-J-Duser.language=en</compilerArg>
                 <compilerArg>-J-Dfile.encoding=UTF-8</compilerArg>
-                <compilerArg>-J-Xbootclasspath/p:${unsafe.jar}</compilerArg>
-                <compilerArg>-Xbootclasspath/p:${unsafe.jar}</compilerArg>
+                <compilerArg>${bootclasspath}</compilerArg>
                 <compilerArg>-J-Xmx${jruby.compile.memory}</compilerArg>
               </compilerArgs>
               <includes>
@@ -1106,6 +1105,15 @@ DO NOT MODIFIY - GENERATED CODE
           </plugin>
         </plugins>
       </build>
+    </profile>
+    <profile>
+      <id>bootclasspath</id>
+      <activation>
+        <jdk>1.8</jdk>
+      </activation>
+      <properties>
+        <bootclasspath>-J-Xbootclasspath/p:${unsafe.jar}</bootclasspath>
+      </properties>
     </profile>
     <profile>
       <id>tzdata</id>
