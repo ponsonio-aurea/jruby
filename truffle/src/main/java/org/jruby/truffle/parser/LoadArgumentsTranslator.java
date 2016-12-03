@@ -119,7 +119,6 @@ public class LoadArgumentsTranslator extends Translator {
         argsNode = node;
 
         final RubySourceSection sourceSection = translate(node.getPosition());
-        final SourceSection fullSourceSection = sourceSection.toSourceSection(source);
 
         final List<RubyNode> sequence = new ArrayList<>();
 
@@ -497,7 +496,7 @@ public class LoadArgumentsTranslator extends Translator {
 
         final List<ParseNode> childNodes;
 
-        if (node.childNodes() == null || node.childNodes().get(0) == null) {
+        if (node.childNodes().get(0) == null) {
             childNodes = Collections.emptyList();
         } else {
             childNodes = node.childNodes().get(0).childNodes();

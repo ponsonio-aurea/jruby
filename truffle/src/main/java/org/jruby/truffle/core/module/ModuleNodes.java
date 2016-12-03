@@ -380,10 +380,20 @@ public abstract class ModuleNodes {
             final Arity arity = isGetter ? Arity.NO_ARGUMENTS : Arity.ONE_REQUIRED;
             final String ivar = "@" + name;
             final String accessorName = isGetter ? name : name + "=";
-            final String indicativeName = name + "(attr_" + (isGetter ? "reader" : "writer") + ")";
 
             final RubyNode checkArity = Translator.createCheckArityNode(getContext(), sourceSection.getSource(), rubySourceSection, arity);
-            final SharedMethodInfo sharedMethodInfo = new SharedMethodInfo(sourceSection, LexicalScope.NONE, arity, indicativeName, false, null, false, false, false);
+
+            final SharedMethodInfo sharedMethodInfo = new SharedMethodInfo(
+                    sourceSection,
+                    LexicalScope.NONE,
+                    arity,
+                    module,
+                    accessorName,
+                    "attr_" + (isGetter ? "reader" : "writer"),
+                    null,
+                    false,
+                    false,
+                    false);
 
             final RubyNode self = new ProfileArgumentNode(new ReadSelfNode());
             final RubyNode accessInstanceVariable;
@@ -1624,6 +1634,26 @@ public abstract class ModuleNodes {
             for (Object arg : args) {
                 String name = nameToJavaStringNode.executeToJavaString(frame, arg);
                 Layouts.MODULE.getFields(module).changeConstantVisibility(getContext(), this, name, true);
+            }
+            return module;
+        }
+    }
+
+    @CoreMethod(names = "deprecate_constant", rest = true, raiseIfFrozenSelf = true)
+    public abstract static class DeprecateConstantNode extends CoreMethodArrayArgumentsNode {
+
+        @Child NameToJavaStringNode nameToJavaStringNode = NameToJavaStringNode.create();
+
+        public DeprecateConstantNode(RubyContext context, SourceSection sourceSection) {
+            super(context, sourceSection);
+            this.nameToJavaStringNode = NameToJavaStringNode.create();
+        }
+
+        @Specialization
+        public DynamicObject deprecateConstant(VirtualFrame frame, DynamicObject module, Object[] args) {
+            for (Object arg : args) {
+                String name = nameToJavaStringNode.executeToJavaString(frame, arg);
+                Layouts.MODULE.getFields(module).deprecateConstant(getContext(), this, name);
             }
             return module;
         }

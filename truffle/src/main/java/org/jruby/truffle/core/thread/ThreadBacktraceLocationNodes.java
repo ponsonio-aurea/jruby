@@ -14,6 +14,7 @@ import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.nodes.RootNode;
 import com.oracle.truffle.api.object.DynamicObject;
+import com.oracle.truffle.api.source.Source;
 import com.oracle.truffle.api.source.SourceSection;
 import org.jcodings.specific.UTF8Encoding;
 import org.jruby.truffle.builtins.CoreClass;
@@ -26,8 +27,7 @@ import org.jruby.truffle.language.backtrace.Activation;
 @CoreClass("Thread::Backtrace::Location")
 public class ThreadBacktraceLocationNodes {
 
-    @CoreMethod(names = { "absolute_path", "path" })
-    // TODO (eregon, 8 July 2015): these two methods are slightly different (path can be relative if it is the main script)
+    @CoreMethod(names = "absolute_path")
     public abstract static class AbsolutePathNode extends UnaryCoreMethodNode {
 
         @TruffleBoundary
@@ -40,20 +40,57 @@ public class ThreadBacktraceLocationNodes {
             }
 
             final SourceSection sourceSection = activation.getCallNode().getEncapsulatingSourceSection();
+            final Source source = sourceSection.getSource();
 
-            if (sourceSection.getSource() == null) {
-                return createString(StringOperations.encodeRope(sourceSection.getShortDescription(), UTF8Encoding.INSTANCE));
-            }
-
-            // TODO CS 30-Apr-15: not absolute - not sure how to solve that
-
-            final String path = sourceSection.getSource().getName();
+            // Get absolute path
+            final String path = source.getPath();
 
             if (path == null) {
                 return coreStrings().UNKNOWN.createInstance();
             } else {
                 return createString(getContext().getRopeTable().getRope(path));
             }
+        }
+
+    }
+
+    @CoreMethod(names = "path")
+    public abstract static class PathNode extends UnaryCoreMethodNode {
+
+        @TruffleBoundary
+        @Specialization
+        public DynamicObject path(DynamicObject threadBacktraceLocation) {
+            final Activation activation = ThreadBacktraceLocationLayoutImpl.INSTANCE.getActivation(threadBacktraceLocation);
+
+            if (activation.getCallNode() == null) {
+                return coreStrings().BACKTRACE_OMITTED_LIMIT.createInstance();
+            }
+
+            final SourceSection sourceSection = activation.getCallNode().getEncapsulatingSourceSection();
+            final Source source = sourceSection.getSource();
+
+            // Get file path except for the main script
+            final String path = source.getName();
+
+            if (path == null) {
+                return coreStrings().UNKNOWN.createInstance();
+            } else {
+                return createString(getContext().getRopeTable().getRope(path));
+            }
+        }
+
+    }
+
+    @CoreMethod(names = "label")
+    public abstract static class LabelNode extends UnaryCoreMethodNode {
+
+        @Specialization
+        public DynamicObject label(DynamicObject threadBacktraceLocation) {
+            final Activation activation = ThreadBacktraceLocationLayoutImpl.INSTANCE.getActivation(threadBacktraceLocation);
+            // TODO eregon 8 Nov. 2016 This does not handle blocks
+            final String methodName = activation.getMethod().getSharedMethodInfo().getName();
+
+            return StringOperations.createString(getContext(), StringOperations.encodeRope(methodName, UTF8Encoding.INSTANCE));
         }
 
     }
@@ -91,10 +128,6 @@ public class ThreadBacktraceLocationNodes {
             final RootNode rootNode = callNode.getRootNode();
 
             final SourceSection sourceSection = callNode.getEncapsulatingSourceSection();
-
-            if (sourceSection.getSource() == null) {
-                return createString(StringOperations.encodeRope(sourceSection.getShortDescription(), UTF8Encoding.INSTANCE));
-            }
 
             return createString(RopeOperations.format(getContext(),
                     sourceSection.getSource().getName(),

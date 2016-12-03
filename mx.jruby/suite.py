@@ -6,32 +6,35 @@
 # GNU General Public License version 2
 # GNU Lesser General Public License version 2.1
 
-def mavenLib(mavenDep, sha1):
+def mavenLib(mavenDep, sha1, sourceSha1, license):
     groupId, artifactId, version = mavenDep.split(':')
     args = (groupId.replace('.', '/'), artifactId, version, artifactId, version)
-    url = "https://search.maven.org/remotecontent?filepath=%s/%s/%s/%s-%s.jar" % args
+    base = "https://search.maven.org/remotecontent?filepath=%s/%s/%s/%s-%s" % args
+    url = base + ".jar"
+    sourceUrl = base + '-sources.jar'
     return {
         "urls": [ url ],
         "sha1": sha1,
+        "sourceUrls": [ sourceUrl ],
+        "sourceSha1": sourceSha1,
         "maven": {
             "groupId": groupId,
             "artifactId": artifactId,
             "version": version,
         },
-        "license": "EPL", # fake
+        "license": license
     }
 
 suite = {
-    "mxversion": "5.36.1",
+    "mxversion": "5.59.0",
     "name": "jrubytruffle",
-    "defaultLicense": "EPL",
 
     "imports": {
         "suites": [
             {
                 "name": "truffle",
-                # Must be the same as in truffle/pom.rb and ci.hocon
-                "version": "60fde6f5778d478411632077154bea1679839780",
+                # Must be the same as in truffle/pom.rb (except for the -SNAPSHOT part only in pom.rb, and there we can use a release name)
+                "version": "332a893bdbc0cc4386da2067bd4fcfdcb168e6fc",
                 "urls": [
                     {"url": "https://github.com/graalvm/truffle.git", "kind": "git"},
                     {"url": "https://curio.ssw.jku.at/nexus/content/repositories/snapshots", "kind": "binary"},
@@ -41,27 +44,48 @@ suite = {
     },
 
     "licenses": {
-        "EPL": {
-            "name": "EPL",
+        "EPL-1.0": {
+            "name": "Eclipse Public License 1.0",
             "url": "https://opensource.org/licenses/EPL-1.0",
         },
+        "BSD-simplified" : {
+          "name" : "Simplified BSD License (2-clause BSD license)",
+          "url" : "http://opensource.org/licenses/BSD-2-Clause"
+        },
+        "MIT" : {
+          "name" : "MIT License",
+          "url" : "http://opensource.org/licenses/MIT"
+        },
+        "Apache-2.0" : {
+          "name" : "Apache License 2.0",
+          "url" : "https://opensource.org/licenses/Apache-2.0"
+        },
+        "GPLv2" : {
+          "name" : "GNU General Public License, version 2",
+          "url" : "http://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html"
+        },
+        "zlib" : {
+          "name" : "The zlib License",
+          "url" : "https://opensource.org/licenses/zlib"
+        },
     },
+
+    "repositories" : {
+         "jruby-binary-snapshots" : {
+             "url" : "https://curio.ssw.jku.at/nexus/content/repositories/snapshots",
+             "licenses" : ["EPL-1.0", "BSD-simplified", "BSD-new", "MIT", "Apache-2.0", "GPLv2", "LGPLv21", "zlib"]
+          },
+     },
 
     "libraries": {
 
         # ------------- Libraries -------------
 
-        "ANTLR4_MAIN": mavenLib(
-            "org.antlr:antlr4:4.5.1-1",
-            "a8867c83a73791cf30e30de4cf5d0c9a5f0dfdab"),
-
-        "ANTLR4_RUNTIME": mavenLib(
-            "org.antlr:antlr4-runtime:4.5.1-1",
-            "66144204f9d6d7d3f3f775622c2dd7e9bd511d97"),
-
         "SNAKEYAML": mavenLib(
             "org.yaml:snakeyaml:1.14",
-            "c2df91929ed06a25001939929bff5120e0ea3fd4"),
+            "c2df91929ed06a25001939929bff5120e0ea3fd4",
+            "4c6bcedc3efa772a5ae1c2fd01efee8e4d15edac",
+            "Apache-2.0"),
     },
 
     "projects": {
@@ -71,41 +95,52 @@ suite = {
         "jruby-core": {
             "class": "JRubyCoreMavenProject",
             "sourceDirs": [ "core/src/main/java" ],
-            "watch": [ "core/src" ],
+            "watch": [ "core/src", "core/pom.rb" ],
             "jar": "lib/jruby.jar",
-        },
-
-        "jruby-antlr": {
-            "class": "AntlrProject",
-            "sourceDir": "truffle/src/main/antlr4",
-            "outputDir": "truffle/target/generated-sources/antlr4",
-            "grammars": [ "org/jruby/truffle/core/format/pack/Pack.g4" ],
-            "dependencies": [ "ANTLR4_RUNTIME" ],
+            "license": [ "EPL-1.0", "BSD-new", "BSD-simplified", "MIT", "Apache-2.0" ],
         },
 
         "jruby-truffle": {
-            "dir": "truffle",
-            "sourceDirs": [
-                "src/main/java",
-                "target/generated-sources/antlr4",
-            ],
+            "dir": "truffle/src/main",
+            "sourceDirs": [ "java" ],
             "dependencies": [
                 "jruby-core",
-                "jruby-antlr",
                 "truffle:TRUFFLE_API",
                 "truffle:TRUFFLE_DEBUG",
-                "ANTLR4_RUNTIME",
                 "SNAKEYAML",
             ],
             "annotationProcessors": ["truffle:TRUFFLE_DSL_PROCESSOR"],
             "javaCompliance": "1.8",
             "workingSets": "JRubyTruffle",
+            "checkPackagePrefix": "false",
+            "license": [ "EPL-1.0", "BSD-new", "BSD-simplified", "MIT", "Apache-2.0" ],
         },
 
         "jruby-truffle-ruby": {
             "class": "ArchiveProject",
             "outputDir": "truffle/src/main/ruby",
             "prefix": "jruby-truffle",
+            "license": [ "EPL-1.0", "BSD-new" ],
+        },
+
+        "jruby-truffle-test": {
+            "dir": "truffle/src/test",
+            "sourceDirs": ["java"],
+            "dependencies": [
+                "jruby-truffle",
+                "truffle:TRUFFLE_TCK",
+                "mx:JUNIT",
+            ],
+            "javaCompliance": "1.8",
+            "checkPackagePrefix": "false",
+            "license": "EPL-1.0",
+        },
+
+        "jruby-truffle-ruby-test": {
+            "class": "ArchiveProject",
+            "outputDir": "truffle/src/test/ruby",
+            "prefix": "src/test/ruby",
+            "license": "EPL-1.0",
         },
 
         # Depends on jruby-core extracting jni libs in lib/jni
@@ -114,6 +149,7 @@ suite = {
             "outputDir": "lib/jni",
             "prefix": "lib/jni",
             "dependencies": [ "jruby-core" ],
+            "license": [ "Apache-2.0", "MIT" ],
         },
 
         # Depends on jruby-core installing gems in lib/ruby
@@ -122,9 +158,10 @@ suite = {
             "outputDir": "lib/ruby",
             "prefix": "lib/ruby",
             "dependencies": [ "jruby-core" ],
+            "license": [ "EPL-1.0", "MIT", "BSD-simplified", "GPLv2", "LGPLv21", "zlib" ],
         },
 
-        "jruby-licences": {
+        "jruby-licenses": {
             "class": "LicensesProject",
             "outputDir": "",
             "prefix": "",
@@ -150,7 +187,7 @@ suite = {
                 "truffle:TRUFFLE_DEBUG",
             ],
             "description": "JRuby+Truffle",
-            "license": "EPL"
+            "license": [ "EPL-1.0", "BSD-new", "BSD-simplified", "MIT", "Apache-2.0" ],
         },
 
         # Set of extra files to extract to run Ruby
@@ -160,10 +197,29 @@ suite = {
             "dependencies": [
                 "jruby-lib-jni",
                 "jruby-lib-ruby",
-                "jruby-licences",
+                "jruby-licenses",
+            ],
+            "overlaps": [
+                "RUBY",
             ],
             "description": "JRuby+Truffle Native Libs",
-            "license": "EPL"
+            "license": [ "EPL-1.0", "MIT", "BSD-simplified", "GPLv2", "LGPLv21", "zlib" ],
+        },
+
+        "RUBY-TEST": {
+            "dependencies": [
+                "jruby-truffle-test",
+                "jruby-truffle-ruby-test",
+            ],
+            "exclude" : [
+                "mx:HAMCREST",
+                "mx:JUNIT"
+            ],
+            "distDependencies": [
+                "RUBY",
+                "truffle:TRUFFLE_TCK"
+            ],
+            "license": "EPL-1.0",
         },
     },
 }

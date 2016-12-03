@@ -73,7 +73,7 @@ describe "Module#define_method when given an UnboundMethod" do
   it "sets the new method's visibility to the current frame's visibility" do
     foo = Class.new do
       def ziggy
-	'piggy'
+        'piggy'
       end
       private :ziggy
 
@@ -222,10 +222,25 @@ describe "Module#define_method" do
     }.should raise_error(ArgumentError)
   end
 
+  ruby_version_is "2.3" do
+    it "does not use the caller block when no block is given" do
+      o = Object.new
+      def o.define(name)
+        self.class.class_eval do
+          define_method(name)
+        end
+      end
+
+      lambda {
+        o.define(:foo) { raise "not used" }
+      }.should raise_error(ArgumentError)
+    end
+  end
+
   it "does not change the arity check style of the original proc" do
     class DefineMethodSpecClass
       prc = Proc.new { || true }
-      method = define_method("proc_style_test", &prc)
+      define_method("proc_style_test", &prc)
     end
 
     obj = DefineMethodSpecClass.new

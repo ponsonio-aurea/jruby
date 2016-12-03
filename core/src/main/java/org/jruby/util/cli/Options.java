@@ -144,7 +144,7 @@ public class Options {
     public static final Option<Boolean> OBJECTSPACE_ENABLED = bool(MISCELLANEOUS, "objectspace.enabled", false, "Enable or disable ObjectSpace.each_object.");
     public static final Option<Boolean> SIPHASH_ENABLED = bool(MISCELLANEOUS, "siphash.enabled", false, "Enable or disable SipHash for String hash function.");
     public static final Option<Boolean> LAUNCH_INPROC = bool(MISCELLANEOUS, "launch.inproc", false, "Set in-process launching of e.g. system('ruby ...').");
-    public static final Option<String> BYTECODE_VERSION = string(MISCELLANEOUS, "bytecode.version", new String[]{"1.6", "1.7", "1.8"}, SafePropertyAccessor.getProperty("java.specification.version", "1.7"), "Specify the major Java bytecode version.");
+    public static final Option<String> BYTECODE_VERSION = string(MISCELLANEOUS, "bytecode.version", new String[]{"1.6", "1.7", "1.8", "1.9"}, SafePropertyAccessor.getProperty("java.specification.version", "1.7"), "Specify the major Java bytecode version.");
     public static final Option<Boolean> MANAGEMENT_ENABLED = bool(MISCELLANEOUS, "management.enabled", false, "Set whether JMX management is enabled.");
     public static final Option<Boolean> JUMP_BACKTRACE = bool(MISCELLANEOUS, "jump.backtrace", false, "Make non-local flow jumps generate backtraces.");
     public static final Option<Boolean> PROCESS_NOUNWRAP = bool(MISCELLANEOUS, "process.noUnwrap", false, "Do not unwrap process streams (issue on some recent JVMs).");
@@ -312,6 +312,13 @@ public class Options {
 
     public static final Option<Boolean> TRUFFLE_GRAAL_WARNING_UNLESS = bool(TRUFFLE, "truffle.graal.warn_unless", true, "Warn unless the JVM has the Graal compiler.");
     public static final Option<Boolean> TRUFFLE_PERF_WARNING = bool(TRUFFLE, "truffle.perf.warn", false, "Warn when using a fature which is not optimized yet.");
+
+    public static final Option<Boolean> TRUFFLE_SHARED_OBJECTS_ENABLED = bool(TRUFFLE, "truffle.shared.objects", true, "Enable shared objects.");
+    public static final Option<Boolean> TRUFFLE_SHARED_OBJECTS_DEBUG = bool(TRUFFLE, "truffle.shared.objects.debug", false, "Print information about shared objects.");
+    public static final Option<Boolean> TRUFFLE_SHARED_OBJECTS_FORCE = bool(TRUFFLE, "truffle.shared.objects.force", false, "Force sharing of objects roots at startup.");
+    public static final Option<Boolean> TRUFFLE_SHARED_OBJECTS_SHARE_ALL = bool(TRUFFLE, "truffle.shared.objects.share_all", false, "Consider all objects as shared.");
+
+    public static final Option<Boolean> TRUFFLE_CEXTS_LOG_LOAD = bool(TRUFFLE, "truffle.cexts.log.load", false, "Log loading of cexts.");
 
     public static String dump() {
         return "# JRuby configuration options with current values\n" +

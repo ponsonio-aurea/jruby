@@ -10,7 +10,6 @@
 package org.jruby.truffle.language.objects;
 
 import com.oracle.truffle.api.CompilerDirectives;
-import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.NodeChildren;
@@ -23,6 +22,7 @@ import org.jruby.truffle.core.string.StringOperations;
 import org.jruby.truffle.language.LexicalScope;
 import org.jruby.truffle.language.RubyConstant;
 import org.jruby.truffle.language.RubyNode;
+import org.jruby.truffle.language.WarnNode;
 import org.jruby.truffle.language.control.RaiseException;
 import org.jruby.truffle.language.loader.RequireNode;
 
@@ -30,13 +30,19 @@ import org.jruby.truffle.language.loader.RequireNode;
 public abstract class LookupForExistingModuleNode extends RubyNode {
 
     @Child private RequireNode requireNode;
+    @Child private WarnNode warnNode;
 
     public abstract RubyConstant executeLookupForExistingModule(VirtualFrame frame, String name, DynamicObject lexicalParent);
 
     @Specialization(guards = "isRubyModule(lexicalParent)")
     public RubyConstant lookupForExistingModule(VirtualFrame frame, String name, DynamicObject lexicalParent,
-            @Cached("createBinaryProfile()") ConditionProfile autoloadProfile) {
+            @Cached("createBinaryProfile()") ConditionProfile autoloadProfile,
+            @Cached("createBinaryProfile()") ConditionProfile warnProfile) {
         RubyConstant constant = deepConstantSearch(name, lexicalParent);
+
+        if (warnProfile.profile(constant != null && constant.isDeprecated())) {
+            warnDeprecatedConstant(frame, name);
+        }
 
         // If a constant already exists with this class/module name and it's an autoload module, we have to trigger
         // the autoload behavior before proceeding.
@@ -49,13 +55,19 @@ public abstract class LookupForExistingModuleNode extends RubyNode {
 
             Layouts.MODULE.getFields(lexicalParent).removeConstant(getContext(), this, name);
             getRequireNode().executeRequire(frame, StringOperations.getString((DynamicObject) constant.getValue()));
-            return deepConstantSearch(name, lexicalParent);
+            final RubyConstant autoConstant = deepConstantSearch(name, lexicalParent);
+
+            if (warnProfile.profile(constant != null && constant.isDeprecated())) {
+                warnDeprecatedConstant(frame, name);
+            }
+
+            return autoConstant;
         }
 
         return constant;
     }
 
-    @TruffleBoundary
+    @CompilerDirectives.TruffleBoundary(throwsControlFlowException = true)
     private RubyConstant deepConstantSearch(String name, DynamicObject lexicalParent) {
         RubyConstant constant = Layouts.MODULE.getFields(lexicalParent).getConstant(name);
 
@@ -74,6 +86,7 @@ public abstract class LookupForExistingModuleNode extends RubyNode {
         if (constant != null && !constant.isVisibleTo(getContext(), LexicalScope.NONE, lexicalParent)) {
             throw new RaiseException(getContext().getCoreExceptions().nameErrorPrivateConstant(lexicalParent, name, this));
         }
+
         return constant;
     }
 
@@ -83,6 +96,15 @@ public abstract class LookupForExistingModuleNode extends RubyNode {
             requireNode = insert(RequireNode.create());
         }
         return requireNode;
+    }
+
+    private void warnDeprecatedConstant(VirtualFrame frame, String name) {
+        if (warnNode == null) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            warnNode = insert(new WarnNode());
+        }
+
+        warnNode.execute(frame, "constant ", name, " is deprecated");
     }
 
 }

@@ -28,7 +28,9 @@ project 'JRuby Core' do
               'jruby.basedir' => '${basedir}/..',
               'jruby.test.memory' => '3G',
               'jruby.test.memory.permgen' => '2G',
-              'jruby.compile.memory' => '2G' )
+              'jruby.compile.memory' => '2G',
+
+              'create.sources.jar' => false )
 
   IO.foreach(File.join(basedir, '..', 'default.build.properties')) do |line|
     line.chomp!
@@ -46,12 +48,12 @@ project 'JRuby Core' do
 
   # exclude jnr-ffi to avoid problems with shading and relocation of the asm packages
   jar 'com.github.jnr:jnr-netdb:1.1.6', :exclusions => ['com.github.jnr:jnr-ffi']
-  jar 'com.github.jnr:jnr-enxio:0.13', :exclusions => ['com.github.jnr:jnr-ffi']
+  jar 'com.github.jnr:jnr-enxio:0.14-SNAPSHOT', :exclusions => ['com.github.jnr:jnr-ffi']
   jar 'com.github.jnr:jnr-x86asm:1.0.2', :exclusions => ['com.github.jnr:jnr-ffi']
-  jar 'com.github.jnr:jnr-unixsocket:0.13', :exclusions => ['com.github.jnr:jnr-ffi']
-  jar 'com.github.jnr:jnr-posix:3.0.30', :exclusions => ['com.github.jnr:jnr-ffi']
-  jar 'com.github.jnr:jnr-constants:0.9.4', :exclusions => ['com.github.jnr:jnr-ffi']
-  jar 'com.github.jnr:jnr-ffi:2.1.0'
+  jar 'com.github.jnr:jnr-unixsocket:0.14', :exclusions => ['com.github.jnr:jnr-ffi']
+  jar 'com.github.jnr:jnr-posix:3.0.32', :exclusions => ['com.github.jnr:jnr-ffi']
+  jar 'com.github.jnr:jnr-constants:0.9.6', :exclusions => ['com.github.jnr:jnr-ffi']
+  jar 'com.github.jnr:jnr-ffi:2.1.1'
   jar 'com.github.jnr:jffi:${jffi.version}'
   jar 'com.github.jnr:jffi:${jffi.version}:native'
 
@@ -64,7 +66,6 @@ project 'JRuby Core' do
   jar 'com.headius:options:1.4'
   jar 'com.headius:coro-mock:1.0', :scope => 'provided'
   jar 'com.headius:unsafe-mock', '${unsafe.version}', :scope => 'provided'
-  jar 'com.headius:jsr292-mock:1.1', :scope => 'provided'
 
   jar 'bsf:bsf:2.4.0', :scope => 'provided'
   jar 'com.jcraft:jzlib:1.1.3'
@@ -273,17 +274,24 @@ project 'JRuby Core' do
                                         'shadedPattern' => 'org.jruby.org.objectweb' } ],
                    'outputFile' => '${jruby.basedir}/lib/jruby.jar',
                    'transformers' => [ { '@implementation' => 'org.apache.maven.plugins.shade.resource.ManifestResourceTransformer',
-                                         'mainClass' => 'org.jruby.Main' } ] )
+                                         'mainClass' => 'org.jruby.Main' } ],
+                   'createSourcesJar' => '${create.sources.jar}' )
   end
 
   [:all, :release, :main, :osgi, :j2ee, :complete, :dist, :'jruby_complete_jar_extended', :'jruby-jars' ].each do |name|
     profile name do
+      # we shade in all dependencies which use the asm classes and relocate
+      # the asm package-name. with all jruby artifacts behave the same
+      # regarding asm: lib/jruby, jruby-core and jruby-complete via maven
       plugin :shade do
         execute_goals( 'shade',
                        :id => 'shade the asm classes',
                        :phase => 'package',
                        'artifactSet' => {
+                         # IMPORTANT these needs to match exclusions in
+                         # maven/jruby-complete/pom.rb
                          'includes' => [ 'com.github.jnr:jnr-ffi',
+                                         'me.qmx.jitescript:jitescript',
                                          'org.ow2.asm:*' ]
                        },
                        'relocations' => [ { 'pattern' =>  'org.objectweb',
@@ -397,5 +405,17 @@ project 'JRuby Core' do
     properties( 'tzdata.jar.version' => '${tzdata.version}',
                 'tzdata.scope' => 'runtime' )
 
+  end
+
+  profile 'generate sources jar' do
+    activation do
+      property( :name => 'create.sources.jar', :value => 'true' )
+    end
+
+    plugin :source do
+      execute_goals( 'jar-no-fork',
+                     :id => 'pack core sources',
+                     :phase => 'prepare-package' ) # Needs to run before the shade plugin
+    end
   end
 end

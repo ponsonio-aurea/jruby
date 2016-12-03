@@ -16,6 +16,13 @@
 *.tokens
 *.su
 *.ll
+*.bc
+extconf.h
+mkmf.log
+Makefile
+cext-output.txt
+bench-results.json
+bench-results-processed.json
 
 .DS_Store
 .debug.properties
@@ -24,10 +31,6 @@
 build
 build.properties
 build_graph.png
-/mx.jruby/*pyc
-/mx.jruby/env
-/mxbuild
-/mx.imports
 core/src/main/java/org/jruby/runtime/Constants.java
 dependency-reduced-pom.xml
 dev_null
@@ -88,7 +91,6 @@ tool/nailgun/ng
 reference.txt
 rubyspec_temp
 .polyglot.pom.rb
-tool/truffle/jruby_truffle_runner/jruby+truffle_runner-*.gem
 test/truffle/cexts/**/Makefile
 
 # binaries
@@ -119,7 +121,17 @@ nbproject/private
 .classpath
 .project
 .settings
+.factorypath
 build.eclipse
+
+# mx
+/mx.jruby/*pyc
+/mx.jruby/env
+/mx.jruby/eclipse-launches/
+/mxbuild
+/mx.imports
+/RUBY.dist
+/RUBY-TEST.dist
 
 # Truffle findbugs
 truffle-findbugs-report.html

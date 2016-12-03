@@ -12,6 +12,7 @@ package org.jruby.truffle.extra.ffi;
 import com.kenai.jffi.MemoryIO;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.TruffleOptions;
 import com.oracle.truffle.api.dsl.ImportStatic;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.object.DynamicObject;
@@ -204,7 +205,9 @@ public abstract class PointerPrimitiveNodes {
 
         @Specialization
         public DynamicObject readPointer(DynamicObject pointer) {
-            Pointer readPointer = Layouts.POINTER.getPointer(pointer).getPointer(0);
+            Pointer ptr = Layouts.POINTER.getPointer(pointer);
+            assert ptr.address() != 0 : "Attempt to dereference a null pointer";
+            Pointer readPointer = ptr.getPointer(0);
 
             if (readPointer == null) {
                 readPointer = NULL_POINTER;
@@ -319,6 +322,16 @@ public abstract class PointerPrimitiveNodes {
         @TruffleBoundary
         @Specialization(guards = "!isNullPointer(pointer)")
         public DynamicObject readStringToNull(DynamicObject pointer) {
+            if (TruffleOptions.AOT) {
+                final jnr.ffi.Pointer ptr = Layouts.POINTER.getPointer(pointer);
+                final int nullOffset = ptr.indexOf(0, (byte) 0);
+                final byte[] bytes = new byte[nullOffset];
+
+                ptr.get(0, bytes, 0, bytes.length);
+
+                return StringOperations.createString(getContext(), new ByteList(bytes));
+            }
+
             return createString(MemoryIO.getInstance().getZeroTerminatedByteArray(Layouts.POINTER.getPointer(pointer).address()), ASCIIEncoding.INSTANCE);
         }
 

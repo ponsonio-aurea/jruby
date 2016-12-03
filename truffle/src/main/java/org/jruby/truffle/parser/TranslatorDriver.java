@@ -68,7 +68,7 @@ public class TranslatorDriver {
 
         final org.jruby.truffle.parser.parser.Parser parser = new org.jruby.truffle.parser.parser.Parser(context);
 
-        final StaticScopeFactory staticScopeFactory = new StaticScopeFactory(context.getJRubyRuntime());
+        final StaticScopeFactory staticScopeFactory = new StaticScopeFactory();
         final StaticScope staticScope = staticScopeFactory.newLocalScope(null);
 
         /*
@@ -117,9 +117,9 @@ public class TranslatorDriver {
 
         boolean isInlineSource = parserContext == ParserContext.SHELL;
         boolean isEvalParse = parserContext == ParserContext.EVAL || parserContext == ParserContext.INLINE || parserContext == ParserContext.MODULE;
-        final ParserConfiguration parserConfiguration = new ParserConfiguration(context.getJRubyRuntime(), 0, isInlineSource, !isEvalParse, false);
+        final ParserConfiguration parserConfiguration = new ParserConfiguration(context, 0, isInlineSource, !isEvalParse, false);
 
-        if (context.getJRubyRuntime().getInstanceConfig().isFrozenStringLiteral()) {
+        if (context.getInstanceConfig().isFrozenStringLiteral()) {
             parserConfiguration.setFrozenStringLiteral(true);
         }
 
@@ -141,7 +141,7 @@ public class TranslatorDriver {
             throw new RaiseException(context.getCoreExceptions().syntaxError(message, currentNode));
         }
 
-        final SourceSection sourceSection = source.createSection("(identifier)", 0, source.getCode().length());
+        final SourceSection sourceSection = source.createSection(0, source.getCode().length());
         final RubySourceSection rubySourceSection = new RubySourceSection(sourceSection);
 
         final InternalMethod parentMethod = parentFrame == null ? null : RubyArguments.getMethod(parentFrame);
@@ -158,7 +158,17 @@ public class TranslatorDriver {
         parseEnvironment.resetLexicalScope(lexicalScope);
 
         // TODO (10 Feb. 2015): name should be "<top (required)> for the require-d/load-ed files.
-        final SharedMethodInfo sharedMethodInfo = new SharedMethodInfo(sourceSection, parseEnvironment.getLexicalScope(), Arity.NO_ARGUMENTS, "<main>", false, null, false, false, false);
+        final SharedMethodInfo sharedMethodInfo = new SharedMethodInfo(
+                sourceSection,
+                parseEnvironment.getLexicalScope(),
+                Arity.NO_ARGUMENTS,
+                null,
+                "<main>",
+                null,
+                null,
+                false,
+                false,
+                false);
 
         final TranslatorEnvironment environment = new TranslatorEnvironment(context, parentEnvironment,
                 parseEnvironment, parseEnvironment.allocateReturnID(), ownScopeForAssignments, false, sharedMethodInfo, sharedMethodInfo.getName(), 0, null);
@@ -247,8 +257,17 @@ public class TranslatorDriver {
     }
 
     private TranslatorEnvironment environmentForFrameDescriptor(RubyContext context, FrameDescriptor frameDescriptor) {
-            SourceSection sourceSection = SourceSection.createUnavailable("Unknown source section", "(unknown)");
-            final SharedMethodInfo sharedMethodInfo = new SharedMethodInfo(sourceSection, context.getRootLexicalScope(), Arity.NO_ARGUMENTS, "(unknown)", false, null, false, false, false);
+        final SharedMethodInfo sharedMethodInfo = new SharedMethodInfo(
+                context.getCoreLibrary().getSourceSection(),
+                context.getRootLexicalScope(),
+                Arity.NO_ARGUMENTS,
+                null,
+                null,
+                "external",
+                null,
+                false,
+                false,
+                false);
             // TODO(CS): how do we know if the frame is a block or not?
             return new TranslatorEnvironment(context, null, parseEnvironment,
                     parseEnvironment.allocateReturnID(), true, true, sharedMethodInfo, sharedMethodInfo.getName(), 0, null, frameDescriptor);
@@ -258,8 +277,17 @@ public class TranslatorDriver {
         if (frame == null) {
             return null;
         } else {
-            SourceSection sourceSection = SourceSection.createUnavailable("Unknown source section", "(unknown)");
-            final SharedMethodInfo sharedMethodInfo = new SharedMethodInfo(sourceSection, context.getRootLexicalScope(), Arity.NO_ARGUMENTS, "(unknown)", false, null, false, false, false);
+            final SharedMethodInfo sharedMethodInfo = new SharedMethodInfo(
+                    context.getCoreLibrary().getSourceSection(),
+                    context.getRootLexicalScope(),
+                    Arity.NO_ARGUMENTS,
+                    null,
+                    null,
+                    "external",
+                    null,
+                    false,
+                    false,
+                    false);
             final MaterializedFrame parent = RubyArguments.getDeclarationFrame(frame);
             // TODO(CS): how do we know if the frame is a block or not?
             return new TranslatorEnvironment(context, environmentForFrame(context, parent), parseEnvironment,

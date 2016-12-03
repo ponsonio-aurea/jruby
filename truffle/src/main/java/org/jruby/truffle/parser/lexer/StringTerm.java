@@ -28,11 +28,11 @@
 package org.jruby.truffle.parser.lexer;
 
 import org.jcodings.Encoding;
+import org.jruby.truffle.core.regexp.RegexpOptions;
 import org.jruby.truffle.parser.ast.RegexpParseNode;
 import org.jruby.truffle.parser.parser.Tokens;
 import org.jruby.util.ByteList;
 import org.jruby.util.KCode;
-import org.jruby.util.RegexpOptions;
 
 import java.io.IOException;
 
@@ -417,6 +417,7 @@ nonascii:       hasNonAscii = true; // Label for comparison with MRI only.
     }    
 
     // Was a goto in original ruby lexer
+    @SuppressWarnings("fallthrough")
     private void escaped(RubyLexer lexer, ByteList buffer) throws IOException {
         int c;
 
@@ -431,6 +432,7 @@ nonascii:       hasNonAscii = true; // Label for comparison with MRI only.
         }
     }
 
+    @SuppressWarnings("fallthrough")
     private void parseEscapeIntoBuffer(RubyLexer lexer, ByteList buffer) throws IOException {
         int c;
 

@@ -21,6 +21,7 @@ import org.jruby.truffle.language.RubyConstant;
 import org.jruby.truffle.language.RubyGuards;
 import org.jruby.truffle.language.control.RaiseException;
 import org.jruby.truffle.language.methods.InternalMethod;
+import org.jruby.truffle.language.objects.shared.SharedObjects;
 import org.jruby.truffle.util.StringUtils;
 import org.jruby.util.IdUtil;
 import org.jruby.util.func.Function1;
@@ -336,12 +337,9 @@ public abstract class ModuleOperations {
 
         final Map<String, Object> classVariables = new HashMap<>();
 
-        classVariableLookup(module, new Function1<Object, DynamicObject>() {
-            @Override
-            public Object apply(DynamicObject module) {
-                classVariables.putAll(Layouts.MODULE.getFields(module).getClassVariables());
-                return null;
-            }
+        classVariableLookup(module, module1 -> {
+            classVariables.putAll(Layouts.MODULE.getFields(module1).getClassVariables());
+            return null;
         });
 
         return classVariables;
@@ -351,12 +349,7 @@ public abstract class ModuleOperations {
     public static Object lookupClassVariable(DynamicObject module, final String name) {
         assert RubyGuards.isRubyModule(module);
 
-        return classVariableLookup(module, new Function1<Object, DynamicObject>() {
-            @Override
-            public Object apply(DynamicObject module) {
-                return Layouts.MODULE.getFields(module).getClassVariables().get(name);
-            }
-        });
+        return classVariableLookup(module, module1 -> Layouts.MODULE.getFields(module1).getClassVariables().get(name));
     }
 
     @TruffleBoundary(throwsControlFlowException = true)
@@ -364,6 +357,7 @@ public abstract class ModuleOperations {
         assert RubyGuards.isRubyModule(module);
         ModuleFields moduleFields = Layouts.MODULE.getFields(module);
         moduleFields.checkFrozen(context, currentNode);
+        SharedObjects.propagate(module, value);
 
         // if the cvar is not already defined we need to take lock and ensure there is only one
         // defined in the class tree
@@ -377,15 +371,12 @@ public abstract class ModuleOperations {
     }
 
     private static boolean trySetClassVariable(DynamicObject topModule, final String name, final Object value) {
-        final DynamicObject found = classVariableLookup(topModule, new Function1<DynamicObject, DynamicObject>() {
-            @Override
-            public DynamicObject apply(DynamicObject module) {
-                final ModuleFields moduleFields = Layouts.MODULE.getFields(module);
-                if (moduleFields.getClassVariables().replace(name, value) != null) {
-                    return module;
-                } else {
-                    return null;
-                }
+        final DynamicObject found = classVariableLookup(topModule, module -> {
+            final ModuleFields moduleFields = Layouts.MODULE.getFields(module);
+            if (moduleFields.getClassVariables().replace(name, value) != null) {
+                return module;
+            } else {
+                return null;
             }
         });
         return found != null;

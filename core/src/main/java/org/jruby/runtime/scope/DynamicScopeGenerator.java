@@ -44,6 +44,19 @@ public class DynamicScopeGenerator {
             "getValueNineDepthZero"
     ));
 
+    public static final List<String> SPECIALIZED_GETS_OR_NIL = Collections.unmodifiableList(Arrays.asList(
+            "getValueZeroDepthZeroOrNil",
+            "getValueOneDepthZeroOrNil",
+            "getValueTwoDepthZeroOrNil",
+            "getValueThreeDepthZeroOrNil",
+            "getValueFourDepthZeroOrNil",
+            "getValueFiveDepthZeroOrNil",
+            "getValueSixDepthZeroOrNil",
+            "getValueSevenDepthZeroOrNil",
+            "getValueEightDepthZeroOrNil",
+            "getValueNineDepthZeroOrNil"
+    ));
+
     public static final List<String> SPECIALIZED_SETS = Collections.unmodifiableList(Arrays.asList(
             "setValueZeroDepthZeroVoid",
             "setValueOneDepthZeroVoid",
@@ -65,7 +78,39 @@ public class DynamicScopeGenerator {
         final String clsPath = "org/jruby/runtime/scopes/DynamicScope" + size;
         final String clsName = clsPath.replaceAll("/", ".");
 
+        // try to load the class, in case we have parallel generation happening
+        Class p;
+
         try {
+            p = CDCL.loadClass(clsName);
+        } catch (ClassNotFoundException cnfe) {
+            // try again under lock
+            synchronized (CDCL) {
+                try {
+                    p = CDCL.loadClass(clsName);
+                } catch (ClassNotFoundException cnfe2) {
+                    // proceed to actually generate the class
+                    p = generateInternal(size, clsPath, clsName);
+                }
+            }
+        }
+
+        // acquire constructor handle and store it
+        try {
+            MethodHandle mh = MethodHandles.lookup().findConstructor(p, MethodType.methodType(void.class, StaticScope.class, DynamicScope.class));
+            mh = mh.asType(MethodType.methodType(DynamicScope.class, StaticScope.class, DynamicScope.class));
+            MethodHandle previousMH = specializedFactories.putIfAbsent(size, mh);
+            if (previousMH != null) mh = previousMH;
+
+            return mh;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static Class generateInternal(final int size, final String clsPath, final String clsName) {
+        // ensure only one thread will attempt to generate and define the new class
+        synchronized (CDCL) {
             // create a new one
             final String[] newFields = varList(size);
 
@@ -178,6 +223,36 @@ public class DynamicScopeGenerator {
                     }});
                 }
 
+                for (int i = 0; i < SPECIALIZED_GETS_OR_NIL.size(); i++) {
+                    final int offset = i;
+
+                    defineMethod(SPECIALIZED_GETS_OR_NIL.get(offset), ACC_PUBLIC, sig(IRubyObject.class, IRubyObject.class), new CodeBlock() {{
+                        line(6);
+
+                        if (size <= offset) {
+                            invokestatic(clsPath, "sizeError", sig(RuntimeException.class));
+                            athrow();
+                        } else {
+                            aload(0);
+                            getfield(clsPath, newFields[offset], ci(IRubyObject.class));
+
+                            dup();
+
+                            LabelNode ok = new LabelNode(new Label());
+                            ifnonnull(ok);
+
+                            pop();
+
+                            aload(0);
+                            aload(1);
+                            putfield(clsPath, newFields[offset], ci(IRubyObject.class));
+                            aload(1);
+
+                            label(ok);
+                            areturn();
+                        }
+                    }});
+                }
 
                 for (int i = 0; i < SPECIALIZED_SETS.size(); i++) {
                     final int offset = i;
@@ -212,16 +287,7 @@ public class DynamicScopeGenerator {
                 }});
             }};
 
-            Class p = defineClass(jiteClass);
-
-            MethodHandle mh = MethodHandles.lookup().findConstructor(p, MethodType.methodType(void.class, StaticScope.class, DynamicScope.class));
-            mh = mh.asType(MethodType.methodType(DynamicScope.class, StaticScope.class, DynamicScope.class));
-            MethodHandle previousMH = specializedFactories.putIfAbsent(size, mh);
-            if (previousMH != null) mh = previousMH;
-
-            return mh;
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+            return defineClass(jiteClass);
         }
     }
 
@@ -267,7 +333,15 @@ public class DynamicScopeGenerator {
     }
 
     private static Class defineClass(JiteClass jiteClass) {
-        return CDCL.defineClass(jiteClass.getClassName().replaceAll("/", "."), jiteClass.toBytes(JDKVersion.V1_7));
+        return CDCL.defineClass(classNameFromJiteClass(jiteClass), jiteClass.toBytes(JDKVersion.V1_7));
+    }
+
+    private static Class loadClass(JiteClass jiteClass) throws ClassNotFoundException {
+        return CDCL.loadClass(classNameFromJiteClass(jiteClass));
+    }
+
+    private static String classNameFromJiteClass(JiteClass jiteClass) {
+        return jiteClass.getClassName().replaceAll("/", ".");
     }
 
     private static String[] varList(int size) {

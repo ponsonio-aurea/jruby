@@ -11,6 +11,7 @@ package org.jruby.truffle.core.objectspace;
 
 import com.oracle.truffle.api.Assumption;
 import com.oracle.truffle.api.CompilerDirectives;
+import com.oracle.truffle.api.TruffleOptions;
 import com.oracle.truffle.api.object.DynamicObject;
 import com.oracle.truffle.api.utilities.CyclicAssumption;
 import org.jruby.RubyGC;
@@ -93,12 +94,7 @@ public class ObjectSpaceManager {
             // TODO(CS): should we be running this in a real Ruby thread?
 
             finalizerThread = ThreadManager.createRubyThread(context);
-            ThreadManager.initialize(finalizerThread, context, null, "finalizer", new Runnable() {
-                @Override
-                public void run() {
-                    runFinalizers();
-                }
-            });
+            ThreadManager.initialize(finalizerThread, context, null, "finalizer", () -> runFinalizers());
         }
     }
 
@@ -113,14 +109,14 @@ public class ObjectSpaceManager {
     private void runFinalizers() {
         // Run in a loop
 
+        if (TruffleOptions.AOT) {
+            // ReferenceQueue#remove is not available with AOT.
+            return;
+        }
+
         while (true) {
             // Wait on the finalizer queue
-            FinalizerReference finalizerReference = context.getThreadManager().runUntilResult(null, new ThreadManager.BlockingAction<FinalizerReference>() {
-                @Override
-                public FinalizerReference block() throws InterruptedException {
-                    return (FinalizerReference) finalizerQueue.remove();
-                }
-            });
+            FinalizerReference finalizerReference = (FinalizerReference) context.getThreadManager().runUntilResult(null, () -> finalizerQueue.remove());
 
             runFinalizers(context, finalizerReference);
         }
@@ -169,6 +165,10 @@ public class ObjectSpaceManager {
     }
 
     public void traceAllocation(DynamicObject object, DynamicObject classPath, DynamicObject methodId, DynamicObject sourcefile, int sourceline) {
+        if (TruffleOptions.AOT) {
+            throw new UnsupportedOperationException("Memory manager is not available with AOT.");
+        }
+
         if (tracingPaused) {
             return;
         }

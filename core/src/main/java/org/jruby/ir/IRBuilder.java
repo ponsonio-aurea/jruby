@@ -561,10 +561,6 @@ public class IRBuilder {
     }
 
     protected Operand buildWithOrder(Node node, boolean preserveOrder) {
-        // Even though String literals are mutable they cannot fail or depend on rest of program's semantics so
-        // they can ignore order.
-        if (node instanceof StrNode) return buildStrRaw((StrNode) node);
-
         Operand value = build(node);
 
         // We need to preserve order in cases (like in presence of assignments) except that immutable
@@ -1036,7 +1032,8 @@ public class IRBuilder {
                 callNode.getArgsNode() instanceof ArrayNode &&
                 (argsAry = (ArrayNode) callNode.getArgsNode()).size() == 1 &&
                 argsAry.get(0) instanceof StrNode &&
-                !scope.maybeUsingRefinements()) {
+                !scope.maybeUsingRefinements() &&
+                callNode.getIterNode() == null) {
             StrNode keyNode = (StrNode) argsAry.get(0);
             addInstr(ArrayDerefInstr.create(callResult, receiver, new FrozenString(keyNode.getValue(), keyNode.getCodeRange(), keyNode.getPosition().getFile(), keyNode.getLine())));
             return callResult;
@@ -3352,10 +3349,16 @@ public class IRBuilder {
         if (RubyInstanceConfig.FULL_TRACE_ENABLED || !(rescueNode instanceof RescueModNode) &&
                 rescueNode.getElseNode() != null) return false;
 
+        Node body = rescueNode.getRescueNode().getBodyNode();
+
+        // This optimization omits backtrace info for the exception getting rescued so we cannot
+        // optimize the exception variable.
+        if (body instanceof GlobalVarNode && ((GlobalVarNode) body).getName().equals("$!")) return false;
+
         // FIXME: This MIGHT be able to expand to more complicated expressions like Hash or Array if they
         // contain only SideEffectFree nodes.  Constructing a literal out of these should be safe from
         // effecting or being able to access $!.
-        return rescueNode.getRescueNode().getBodyNode() instanceof SideEffectFree;
+        return body instanceof SideEffectFree;
     }
 
     private Operand buildRescueInternal(RescueNode rescueNode, EnsureBlockInfo ensure) {

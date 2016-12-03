@@ -11,10 +11,8 @@
 package org.jruby.truffle.core.string;
 
 import com.oracle.truffle.api.object.DynamicObject;
-import org.jcodings.specific.ASCIIEncoding;
 import org.jruby.truffle.Layouts;
 import org.jruby.truffle.core.rope.CodeRange;
-import org.jruby.truffle.core.rope.Rope;
 import org.jruby.truffle.core.rope.RopeBuffer;
 import org.jruby.truffle.language.RubyGuards;
 
@@ -29,7 +27,7 @@ public class StringGuards {
 
     public static boolean is7Bit(DynamicObject string) {
         assert RubyGuards.isRubyString(string);
-        return StringOperations.getCodeRange(string) == CodeRange.CR_7BIT;
+        return StringOperations.codeRange(string) == CodeRange.CR_7BIT;
     }
 
     public static boolean isAsciiCompatible(DynamicObject string) {

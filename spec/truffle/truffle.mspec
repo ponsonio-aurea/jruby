@@ -10,6 +10,10 @@ class MSpecScript
     RbConfig::CONFIG['host_os'] == 'linux'
   end
 
+  def self.solaris?
+    RbConfig::CONFIG['host_os'] == 'solaris'
+  end
+
   JRUBY_DIR = File.expand_path('../../..', __FILE__)
 
   set :target, "#{JRUBY_DIR}/bin/jruby#{windows? ? '.bat' : ''}"
@@ -37,11 +41,6 @@ class MSpecScript
 
   set :core, [
     "spec/ruby/core",
-    
-    # Troublesome - they do work, but sometimes fail, sometimes timeout
-    "^spec/ruby/core/io/io_spec.rb",
-    "^spec/ruby/core/io/popen_spec.rb",
-    "^spec/ruby/core/io/pipe_spec.rb"
   ]
 
   set :library, [
@@ -146,6 +145,11 @@ class MSpecScript
     set :xtags, (get(:xtags) || []) + ['linux']
   end
 
+  if solaris?
+    # exclude specs tagged with 'solaris'
+    set :xtags, (get(:xtags) || []) + ['solaris']
+  end
+
   # Enable features
   MSpec.enable_feature :fiber
   MSpec.enable_feature :fiber_library
@@ -156,8 +160,10 @@ class MSpecScript
   set :files, get(:language) + get(:core) + get(:library) + get(:truffle)
 end
 
-is_child_process = respond_to?(:ruby_exe)
+is_child_process = ENV.key? "MSPEC_RUNNER"
 if i = ARGV.index('slow') and ARGV[i-1] == '--excl-tag' and is_child_process
+  require 'mspec'
+
   class SlowSpecsTagger
     def initialize
       MSpec.register :exception, self

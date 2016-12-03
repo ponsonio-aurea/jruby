@@ -12,7 +12,7 @@ DO NOT MODIFIY - GENERATED CODE
   <parent>
     <groupId>org.jruby</groupId>
     <artifactId>jruby-parent</artifactId>
-    <version>9.1.6.0-SNAPSHOT</version>
+    <version>9.1.7.0-SNAPSHOT</version>
   </parent>
   <artifactId>jruby-core</artifactId>
   <name>JRuby Core</name>
@@ -42,6 +42,7 @@ DO NOT MODIFIY - GENERATED CODE
     <test.results.dir>${build.dir}/test-results</test.results.dir>
     <jruby.compile.memory>2G</jruby.compile.memory>
     <build.lib.dir>test/target</build.lib.dir>
+    <create.sources.jar>false</create.sources.jar>
     <anno.sources>${project.basedir}/target/generated-sources</anno.sources>
     <jruby.launch.memory>1024M</jruby.launch.memory>
     <jruby.win32ole.gem>jruby-win32ole</jruby.win32ole.gem>
@@ -104,7 +105,7 @@ DO NOT MODIFIY - GENERATED CODE
     <dependency>
       <groupId>com.github.jnr</groupId>
       <artifactId>jnr-enxio</artifactId>
-      <version>0.13</version>
+      <version>0.14-SNAPSHOT</version>
       <exclusions>
         <exclusion>
           <artifactId>jnr-ffi</artifactId>
@@ -126,7 +127,7 @@ DO NOT MODIFIY - GENERATED CODE
     <dependency>
       <groupId>com.github.jnr</groupId>
       <artifactId>jnr-unixsocket</artifactId>
-      <version>0.13</version>
+      <version>0.14</version>
       <exclusions>
         <exclusion>
           <artifactId>jnr-ffi</artifactId>
@@ -137,7 +138,7 @@ DO NOT MODIFIY - GENERATED CODE
     <dependency>
       <groupId>com.github.jnr</groupId>
       <artifactId>jnr-posix</artifactId>
-      <version>3.0.30</version>
+      <version>3.0.32</version>
       <exclusions>
         <exclusion>
           <artifactId>jnr-ffi</artifactId>
@@ -148,7 +149,7 @@ DO NOT MODIFIY - GENERATED CODE
     <dependency>
       <groupId>com.github.jnr</groupId>
       <artifactId>jnr-constants</artifactId>
-      <version>0.9.4</version>
+      <version>0.9.6</version>
       <exclusions>
         <exclusion>
           <artifactId>jnr-ffi</artifactId>
@@ -159,7 +160,7 @@ DO NOT MODIFIY - GENERATED CODE
     <dependency>
       <groupId>com.github.jnr</groupId>
       <artifactId>jnr-ffi</artifactId>
-      <version>2.1.0</version>
+      <version>2.1.1</version>
     </dependency>
     <dependency>
       <groupId>com.github.jnr</groupId>
@@ -212,12 +213,6 @@ DO NOT MODIFIY - GENERATED CODE
       <groupId>com.headius</groupId>
       <artifactId>unsafe-mock</artifactId>
       <version>${unsafe.version}</version>
-      <scope>provided</scope>
-    </dependency>
-    <dependency>
-      <groupId>com.headius</groupId>
-      <artifactId>jsr292-mock</artifactId>
-      <version>1.1</version>
       <scope>provided</scope>
     </dependency>
     <dependency>
@@ -634,6 +629,7 @@ DO NOT MODIFIY - GENERATED CODE
                   <mainClass>org.jruby.Main</mainClass>
                 </transformer>
               </transformers>
+              <createSourcesJar>${create.sources.jar}</createSourcesJar>
             </configuration>
           </execution>
         </executions>
@@ -684,6 +680,7 @@ DO NOT MODIFIY - GENERATED CODE
                   <artifactSet>
                     <includes>
                       <include>com.github.jnr:jnr-ffi</include>
+                      <include>me.qmx.jitescript:jitescript</include>
                       <include>org.ow2.asm:*</include>
                     </includes>
                   </artifactSet>
@@ -717,6 +714,7 @@ DO NOT MODIFIY - GENERATED CODE
                   <artifactSet>
                     <includes>
                       <include>com.github.jnr:jnr-ffi</include>
+                      <include>me.qmx.jitescript:jitescript</include>
                       <include>org.ow2.asm:*</include>
                     </includes>
                   </artifactSet>
@@ -750,6 +748,7 @@ DO NOT MODIFIY - GENERATED CODE
                   <artifactSet>
                     <includes>
                       <include>com.github.jnr:jnr-ffi</include>
+                      <include>me.qmx.jitescript:jitescript</include>
                       <include>org.ow2.asm:*</include>
                     </includes>
                   </artifactSet>
@@ -783,6 +782,7 @@ DO NOT MODIFIY - GENERATED CODE
                   <artifactSet>
                     <includes>
                       <include>com.github.jnr:jnr-ffi</include>
+                      <include>me.qmx.jitescript:jitescript</include>
                       <include>org.ow2.asm:*</include>
                     </includes>
                   </artifactSet>
@@ -816,6 +816,7 @@ DO NOT MODIFIY - GENERATED CODE
                   <artifactSet>
                     <includes>
                       <include>com.github.jnr:jnr-ffi</include>
+                      <include>me.qmx.jitescript:jitescript</include>
                       <include>org.ow2.asm:*</include>
                     </includes>
                   </artifactSet>
@@ -849,6 +850,7 @@ DO NOT MODIFIY - GENERATED CODE
                   <artifactSet>
                     <includes>
                       <include>com.github.jnr:jnr-ffi</include>
+                      <include>me.qmx.jitescript:jitescript</include>
                       <include>org.ow2.asm:*</include>
                     </includes>
                   </artifactSet>
@@ -882,6 +884,7 @@ DO NOT MODIFIY - GENERATED CODE
                   <artifactSet>
                     <includes>
                       <include>com.github.jnr:jnr-ffi</include>
+                      <include>me.qmx.jitescript:jitescript</include>
                       <include>org.ow2.asm:*</include>
                     </includes>
                   </artifactSet>
@@ -915,6 +918,7 @@ DO NOT MODIFIY - GENERATED CODE
                   <artifactSet>
                     <includes>
                       <include>com.github.jnr:jnr-ffi</include>
+                      <include>me.qmx.jitescript:jitescript</include>
                       <include>org.ow2.asm:*</include>
                     </includes>
                   </artifactSet>
@@ -948,6 +952,7 @@ DO NOT MODIFIY - GENERATED CODE
                   <artifactSet>
                     <includes>
                       <include>com.github.jnr:jnr-ffi</include>
+                      <include>me.qmx.jitescript:jitescript</include>
                       <include>org.ow2.asm:*</include>
                     </includes>
                   </artifactSet>
@@ -1121,6 +1126,31 @@ DO NOT MODIFIY - GENERATED CODE
         <tzdata.jar.version>${tzdata.version}</tzdata.jar.version>
         <tzdata.scope>runtime</tzdata.scope>
       </properties>
+    </profile>
+    <profile>
+      <id>generate sources jar</id>
+      <activation>
+        <property>
+          <name>create.sources.jar</name>
+          <value>true</value>
+        </property>
+      </activation>
+      <build>
+        <plugins>
+          <plugin>
+            <artifactId>maven-source-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>pack core sources</id>
+                <phase>prepare-package</phase>
+                <goals>
+                  <goal>jar-no-fork</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
     </profile>
   </profiles>
 </project>

@@ -235,31 +235,19 @@ public class CoreExceptions {
 
     @TruffleBoundary
     public DynamicObject errnoError(int errno, Node currentNode) {
-        Errno errnoObj = Errno.valueOf(errno);
-        if (errnoObj == null) {
-            return systemCallError(StringUtils.format("Unknown Error (%s)", errno), errno, currentNode);
-        }
-
-        return ExceptionOperations.createSystemCallError(
-                context.getCoreLibrary().getErrnoClass(errnoObj),
-                StringOperations.createString(context, StringOperations.encodeRope(errnoObj.description(), UTF8Encoding.INSTANCE)),
-                context.getCallStack().getBacktrace(currentNode), errno);
+        return errnoError(errno, "", currentNode);
     }
 
     @TruffleBoundary
-    public DynamicObject errnoError(int errno, String message, Node currentNode) {
+    public DynamicObject errnoError(int errno, String extraMessage, Node currentNode) {
         Errno errnoObj = Errno.valueOf(errno);
-        if (errnoObj == null) {
-            return systemCallError(StringUtils.format("Unknown Error (%s) - %s", errno, message), errno, currentNode);
-        }
-
         DynamicObject errnoClass = context.getCoreLibrary().getErrnoClass(errnoObj);
-        if(errnoClass == null){
-            errnoClass = context.getCoreLibrary().getSystemCallErrorClass();
-            message = "Unknown error: " + errno;
+        if (errnoObj == null || errnoClass == null) {
+            return systemCallError(StringUtils.format("Unknown Error (%s)%s", errno, extraMessage), errno, currentNode);
         }
 
-        final DynamicObject errorMessage = StringOperations.createString(context, StringOperations.encodeRope(StringUtils.format("%s%s", errnoObj.description(), message), UTF8Encoding.INSTANCE));
+        String fullMessage = StringUtils.format("%s%s", errnoObj.description(), extraMessage);
+        DynamicObject errorMessage = StringOperations.createString(context, StringOperations.encodeRope(fullMessage, UTF8Encoding.INSTANCE));
 
         return ExceptionOperations.createSystemCallError(
             errnoClass,
@@ -268,6 +256,11 @@ public class CoreExceptions {
     }
 
     // IndexError
+
+    @TruffleBoundary
+    public DynamicObject indexErrorOutOfString(int index, Node currentNode) {
+        return indexError(StringUtils.format("index %d out of string", index), currentNode);
+    }
 
     @TruffleBoundary
     public DynamicObject indexError(String message, Node currentNode) {
@@ -600,6 +593,10 @@ public class CoreExceptions {
     public DynamicObject loadError(String message, String path, Node currentNode) {
         DynamicObject messageString = StringOperations.createString(context, StringOperations.encodeRope(message, UTF8Encoding.INSTANCE));
         DynamicObject loadError = ExceptionOperations.createRubyException(context.getCoreLibrary().getLoadErrorClass(), messageString, context.getCallStack().getBacktrace(currentNode));
+        if("openssl.so".equals(path)){
+            // This is a workaround for the rubygems/security.rb file expecting the error path to be openssl
+            path = "openssl";
+        }
         loadError.define("@path", StringOperations.createString(context, StringOperations.encodeRope(path, UTF8Encoding.INSTANCE)), 0);
         return loadError;
     }
@@ -776,6 +773,11 @@ public class CoreExceptions {
     @TruffleBoundary
     public DynamicObject encodingCompatibilityErrorIncompatible(Encoding a, Encoding b, Node currentNode) {
         return encodingCompatibilityError(StringUtils.format("incompatible character encodings: %s and %s", a, b), currentNode);
+    }
+
+    @TruffleBoundary
+    public DynamicObject encodingCompatibilityErrorIncompatibleWithOperation(Encoding encoding, Node currentNode) {
+        return encodingCompatibilityError(StringUtils.format("incompatible encoding with this operation: %s", encoding), currentNode);
     }
 
     @TruffleBoundary

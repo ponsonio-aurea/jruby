@@ -9,9 +9,11 @@
  */
 package org.jruby.truffle.core;
 
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.object.DynamicObject;
+import org.jcodings.Encoding;
 import org.jcodings.specific.UTF8Encoding;
 import org.jruby.ext.rbconfig.RbConfigLibrary;
 import org.jruby.truffle.builtins.CoreClass;
@@ -21,8 +23,29 @@ import org.jruby.truffle.builtins.YieldingCoreMethodNode;
 import org.jruby.truffle.core.string.StringOperations;
 import org.jruby.util.unsafe.UnsafeHolder;
 
+import java.util.Set;
+
 @CoreClass("Truffle::System")
 public abstract class TruffleSystemNodes {
+
+    @CoreMethod(names = "initial_environment_variables", onSingleton = true)
+    public abstract static class InitEnvVarsNode extends CoreMethodNode {
+
+        @TruffleBoundary
+        @Specialization
+        public DynamicObject envVars() {
+            final Set<String> variables = System.getenv().keySet();
+            final int size = variables.size();
+            final Encoding localeEncoding = getContext().getEncodingManager().getLocaleEncoding();
+            final Object[] store = new Object[size];
+            int i = 0;
+            for (String variable : variables) {
+                store[i++] = createString(StringOperations.encodeRope(variable, localeEncoding));
+            }
+            return createArray(store, size);
+        }
+
+    }
 
     @CoreMethod(names = "host_cpu", onSingleton = true)
     public abstract static class HostCPUNode extends CoreMethodNode {
@@ -37,6 +60,7 @@ public abstract class TruffleSystemNodes {
     @CoreMethod(names = "host_os", onSingleton = true)
     public abstract static class HostOSNode extends CoreMethodNode {
 
+        @TruffleBoundary
         @Specialization
         public DynamicObject hostOS() {
             return createString(StringOperations.encodeRope(RbConfigLibrary.getOSName(), UTF8Encoding.INSTANCE));

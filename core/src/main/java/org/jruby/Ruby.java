@@ -238,6 +238,10 @@ public final class Ruby implements Constantizable {
      * @see org.jruby.RubyInstanceConfig
      */
     private Ruby(RubyInstanceConfig config) {
+        if (config.getCompileMode().isTruffle()) {
+            throw new UnsupportedOperationException("Truffle isn't supported using a classic context - use PolyglotEngine instead.");
+        }
+
         this.config             = config;
         this.threadService      = new ThreadService(this);
 
@@ -554,20 +558,6 @@ public final class Ruby implements Constantizable {
             return;
         }
 
-        if (getInstanceConfig().getCompileMode() == CompileMode.TRUFFLE) {
-            final JRubyTruffleInterface truffleContext = getTruffleContext();
-            Main.printTruffleTimeMetric("before-run");
-            int exitCode;
-            try {
-                exitCode = truffleContext.execute(filename);
-            } finally {
-                Main.printTruffleTimeMetric("after-run");
-                shutdownTruffleContextIfRunning();
-            }
-
-            throw new MainExitException(exitCode);
-        }
-
         ParseResult parseResult = parseFromMain(filename, inputStream);
 
         // if no DATA, we're done with the stream, shut it down
@@ -839,10 +829,6 @@ public final class Ruby implements Constantizable {
     }
 
     public IRubyObject runScript(Script script, boolean wrap) {
-        if (getInstanceConfig().getCompileMode() == CompileMode.TRUFFLE) {
-            throw new UnsupportedOperationException();
-        }
-
         return script.load(getCurrentContext(), getTopSelf(), wrap);
     }
 
@@ -855,10 +841,6 @@ public final class Ruby implements Constantizable {
     }
 
     public IRubyObject runInterpreter(ThreadContext context, ParseResult parseResult, IRubyObject self) {
-        if (getInstanceConfig().getCompileMode() == CompileMode.TRUFFLE) {
-            throw new UnsupportedOperationException();
-        }
-
         return interpreter.execute(this, parseResult, self);
    }
 
@@ -896,56 +878,6 @@ public final class Ruby implements Constantizable {
 
     public JITCompiler getJITCompiler() {
         return jitCompiler;
-    }
-
-    public JRubyTruffleInterface getTruffleContext() {
-        synchronized (truffleContextMonitor) {
-            if (truffleContext == null) {
-                truffleContext = loadTruffle();
-            }
-            return truffleContext;
-        }
-    }
-
-    private JRubyTruffleInterface loadTruffle() {
-        Main.printTruffleTimeMetric("before-load-context");
-
-        String javaVersion = System.getProperty("java.version");
-        String[] parts = javaVersion.split("\\D+");
-        int firstPart = Integer.valueOf(parts[0]);
-        if (!(firstPart >= 9 || Integer.valueOf(parts[1]) >= 8)) {
-            System.err.println("JRuby+Truffle needs Java 8 to run (found " + javaVersion + ").");
-            System.exit(1);
-        }
-
-        final Class<?> clazz;
-
-        try {
-            clazz = getJRubyClassLoader().loadClass("org.jruby.truffle.JRubyTruffleImpl");
-        } catch (Exception e) {
-            throw new RuntimeException("JRuby's Truffle backend not available - either it was not compiled because JRuby was built with Java 7, or it has been removed", e);
-        }
-
-        final JRubyTruffleInterface truffleContext;
-
-        try {
-            Constructor<?> con = clazz.getConstructor(Ruby.class);
-            truffleContext = (JRubyTruffleInterface) con.newInstance(this);
-        } catch (Exception e) {
-            throw new RuntimeException("Error while calling the constructor of Truffle's RubyContext", e);
-        }
-
-        Main.printTruffleTimeMetric("after-load-context");
-
-        return truffleContext;
-    }
-
-    public void shutdownTruffleContextIfRunning() {
-        synchronized (truffleContextMonitor) {
-            if (truffleContext != null) {
-                truffleContext.dispose();
-            }
-        }
     }
 
     /**
@@ -1276,8 +1208,7 @@ public final class Ruby implements Constantizable {
         // if we can't use reflection, 'jruby' and 'java' won't work; no load.
         boolean reflectionWorks = doesReflectionWork();
 
-        if (!RubyInstanceConfig.DEBUG_PARSER && reflectionWorks
-                && getInstanceConfig().getCompileMode() != CompileMode.TRUFFLE) {
+        if (!RubyInstanceConfig.DEBUG_PARSER && reflectionWorks) {
             loadService.require("jruby");
         }
 
@@ -1286,23 +1217,21 @@ public final class Ruby implements Constantizable {
         // out of base boot mode
         bootingCore = false;
 
-        if (getInstanceConfig().getCompileMode() != CompileMode.TRUFFLE) {
-            // init Ruby-based kernel
-            initRubyKernel();
+        // init Ruby-based kernel
+        initRubyKernel();
 
-            // Define blank modules for feature detection in preludes
-            if (!config.isDisableGems()) {
-                defineModule("Gem");
-            }
-            if (!config.isDisableDidYouMean()) {
-                defineModule("DidYouMean");
-            }
-
-            initRubyPreludes();
-
-            // everything booted, so SizedQueue should be available; set up root fiber
-            ThreadFiber.initRootFiber(context);
+        // Define blank modules for feature detection in preludes
+        if (!config.isDisableGems()) {
+            defineModule("Gem");
         }
+        if (!config.isDisableDidYouMean()) {
+            defineModule("DidYouMean");
+        }
+
+        initRubyPreludes();
+
+        // everything booted, so SizedQueue should be available; set up root fiber
+        ThreadFiber.initRootFiber(context);
 
         if(config.isProfiling()) {
             // additional twiddling for profiled mode
@@ -1324,10 +1253,8 @@ public final class Ruby implements Constantizable {
         bootingRuntime = false;
 
         // Require in all libraries specified on command line
-        if (getInstanceConfig().getCompileMode() != CompileMode.TRUFFLE) {
-            for (String scriptName : config.getRequiredLibraries()) {
-                topSelf.callMethod(context, "require", RubyString.newString(this, scriptName));
-            }
+        for (String scriptName : config.getRequiredLibraries()) {
+            topSelf.callMethod(context, "require", RubyString.newString(this, scriptName));
         }
     }
 
@@ -1797,7 +1724,7 @@ public final class Ruby implements Constantizable {
         // we define the classes at boot because we need them
         addBuiltinIfAllowed("thread.rb", Library.DUMMY);
 
-        if(RubyInstanceConfig.NATIVE_NET_PROTOCOL) {
+        if (RubyInstanceConfig.NATIVE_NET_PROTOCOL) {
             addLazyBuiltin("net/protocol.rb", "net/protocol", "org.jruby.ext.net.protocol.NetProtocolBufferedIOLibrary");
         }
 
@@ -3778,6 +3705,10 @@ public final class Ruby implements Constantizable {
         return newRaiseException(getErrno().getClass("EINTR"), "Interrupted");
     }
 
+    public RaiseException newErrnoEAFNOSUPPORTError(String message) {
+        return newRaiseException(getErrno().getClass("EAFNOSUPPORT"), message);
+    }
+
     public RaiseException newErrnoFromLastPOSIXErrno() {
         RubyClass errnoClass = getErrno(getPosix().errno());
         if (errnoClass == null) errnoClass = systemCallError;
@@ -4098,6 +4029,8 @@ public final class Ruby implements Constantizable {
                     return newErrnoENFILEError();
                 case "Network is unreachable" :
                     return newErrnoENETUNREACHError();
+                case "Address already in use" :
+                    return newErrnoEADDRINUSEError();
                 default :
                     if ( Platform.IS_WINDOWS ) {
                         if ( errorMessage.contains("connection was aborted") ) {
@@ -5180,9 +5113,6 @@ public final class Ruby implements Constantizable {
 
     // Compilation
     private final JITCompiler jitCompiler;
-
-    private JRubyTruffleInterface truffleContext;
-    private final Object truffleContextMonitor = new Object();
 
     // Note: this field and the following static initializer
     // must be located be in this order!

@@ -14,9 +14,11 @@ import com.oracle.truffle.api.CompilerOptions;
 import com.oracle.truffle.api.ExecutionContext;
 import com.oracle.truffle.api.Truffle;
 import com.oracle.truffle.api.TruffleLanguage;
+import com.oracle.truffle.api.TruffleOptions;
 import com.oracle.truffle.api.instrumentation.Instrumenter;
 import com.oracle.truffle.api.object.DynamicObject;
 import org.jruby.Ruby;
+import org.jruby.RubyInstanceConfig;
 import org.jruby.truffle.builtins.PrimitiveManager;
 import org.jruby.truffle.core.CoreLibrary;
 import org.jruby.truffle.core.CoreMethods;
@@ -31,21 +33,19 @@ import org.jruby.truffle.core.string.CoreStrings;
 import org.jruby.truffle.core.string.FrozenStrings;
 import org.jruby.truffle.core.symbol.SymbolTable;
 import org.jruby.truffle.core.thread.ThreadManager;
-import org.jruby.truffle.extra.AttachmentsManager;
 import org.jruby.truffle.interop.InteropManager;
-import org.jruby.truffle.interop.JRubyInterop;
 import org.jruby.truffle.language.CallStackManager;
 import org.jruby.truffle.language.LexicalScope;
-import org.jruby.truffle.language.Options;
 import org.jruby.truffle.language.RubyGuards;
 import org.jruby.truffle.language.SafepointManager;
 import org.jruby.truffle.language.arguments.RubyArguments;
+import org.jruby.truffle.language.control.JavaException;
 import org.jruby.truffle.language.loader.CodeLoader;
 import org.jruby.truffle.language.loader.FeatureLoader;
-import org.jruby.truffle.language.loader.SourceCache;
 import org.jruby.truffle.language.loader.SourceLoader;
 import org.jruby.truffle.language.methods.DeclarationContext;
 import org.jruby.truffle.language.methods.InternalMethod;
+import org.jruby.truffle.language.objects.shared.SharedObjects;
 import org.jruby.truffle.platform.NativePlatform;
 import org.jruby.truffle.platform.NativePlatformFactory;
 import org.jruby.truffle.stdlib.CoverageManager;
@@ -53,22 +53,29 @@ import org.jruby.truffle.tools.InstrumentationServerManager;
 import org.jruby.truffle.tools.callgraph.CallGraph;
 import org.jruby.truffle.tools.callgraph.SimpleWriter;
 
+import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.InputStream;
 import java.io.PrintStream;
 import java.io.UnsupportedEncodingException;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
+import java.security.CodeSource;
 
 public class RubyContext extends ExecutionContext {
 
-    private static volatile RubyContext latestInstance;
-
     private final TruffleLanguage.Env env;
-    private final Ruby jrubyRuntime;
+
+    private final RubyInstanceConfig instanceConfig;
+    private final String jrubyHome;
+    private String originalInputFile;
+
+    private InputStream syntaxCheckInputStream;
+    private boolean verbose;
 
     private final Options options = new Options();
     private final RopeTable ropeTable = new RopeTable();
     private final PrimitiveManager primitiveManager = new PrimitiveManager();
-    private final JRubyInterop jrubyInterop = new JRubyInterop(this);
     private final SafepointManager safepointManager = new SafepointManager(this);
     private final SymbolTable symbolTable;
     private final InteropManager interopManager = new InteropManager(this);
@@ -78,7 +85,6 @@ public class RubyContext extends ExecutionContext {
     private final ObjectSpaceManager objectSpaceManager = new ObjectSpaceManager(this);
     private final AtExitManager atExitManager = new AtExitManager(this);
     private final SourceLoader sourceLoader = new SourceLoader(this);
-    private final SourceCache sourceCache = new SourceCache(sourceLoader);
     private final CallStackManager callStack = new CallStackManager(this);
     private final CoreStrings coreStrings = new CoreStrings(this);
     private final FrozenStrings frozenStrings = new FrozenStrings(this);
@@ -99,13 +105,13 @@ public class RubyContext extends ExecutionContext {
 
     private final Object classVariableDefinitionLock = new Object();
 
-    private final AttachmentsManager attachmentsManager;
+    private String currentDirectory;
 
-    public RubyContext(Ruby jrubyRuntime, TruffleLanguage.Env env) {
-        latestInstance = this;
-
-        this.jrubyRuntime = jrubyRuntime;
+    public RubyContext(RubyInstanceConfig instanceConfig, TruffleLanguage.Env env) {
+        this.instanceConfig = instanceConfig;
         this.env = env;
+        this.jrubyHome = setupJRubyHome();
+        this.currentDirectory = System.getProperty("user.dir");
 
         if (options.CALL_GRAPH) {
             callGraph = new CallGraph();
@@ -149,6 +155,10 @@ public class RubyContext extends ExecutionContext {
         nativePlatform = NativePlatformFactory.createPlatform(this);
         rootLexicalScope = new LexicalScope(null, coreLibrary.getObjectClass());
 
+        // The encoding manager relies on POSIX having been initialized, so we can't process it during
+        // normal core library initialization.
+        coreLibrary.initializeEncodingManager();
+
         threadManager = new ThreadManager(this);
         threadManager.initialize();
 
@@ -161,7 +171,6 @@ public class RubyContext extends ExecutionContext {
         // Capture known builtin methods
 
         final Instrumenter instrumenter = env.lookup(Instrumenter.class);
-        attachmentsManager = new AttachmentsManager(this, instrumenter);
         traceManager = new TraceManager(this, instrumenter);
         coreMethods = new CoreMethods(coreLibrary);
 
@@ -171,10 +180,11 @@ public class RubyContext extends ExecutionContext {
 
         // Load other subsystems
 
-        final PrintStream configStandardOut = jrubyRuntime.getInstanceConfig().getOutput();
+        final PrintStream configStandardOut = instanceConfig.getOutput();
         debugStandardOut = (configStandardOut == System.out) ? null : configStandardOut;
 
-        if (options.INSTRUMENTATION_SERVER_PORT != 0) {
+        // The instrumentation server can't be run with AOT because com.sun.net.httpserver.spi.HttpServerProvider uses runtime class loading.
+        if (!TruffleOptions.AOT && options.INSTRUMENTATION_SERVER_PORT != 0) {
             instrumentationServerManager = new InstrumentationServerManager(this, options.INSTRUMENTATION_SERVER_PORT);
             instrumentationServerManager.start();
         } else {
@@ -184,6 +194,52 @@ public class RubyContext extends ExecutionContext {
         coverageManager = new CoverageManager(this, instrumenter);
 
         coreLibrary.initializePostBoot();
+
+        // Share once everything is loaded
+        if (Options.SHARED_OBJECTS && Options.SHARED_OBJECTS_FORCE) {
+            SharedObjects.startSharing(this);
+        }
+    }
+
+    private String setupJRubyHome() {
+        String jrubyHome = findJRubyHome();
+        instanceConfig.setJRubyHome(jrubyHome);
+        return jrubyHome;
+    }
+
+    private String findJRubyHome() {
+        if (!TruffleOptions.AOT && System.getenv("JRUBY_HOME") == null && System.getProperty("jruby.home") == null) {
+            // Set JRuby home automatically for GraalVM
+            final CodeSource codeSource = Ruby.class.getProtectionDomain().getCodeSource();
+            if (codeSource != null) {
+                final File currentJarFile;
+                try {
+                    currentJarFile = new File(codeSource.getLocation().toURI());
+                } catch (URISyntaxException e) {
+                    throw new JavaException(e);
+                }
+
+                if (currentJarFile.getName().equals("ruby.jar")) {
+                    File jarDir = currentJarFile.getParentFile();
+
+                    // GraalVM
+                    if (new File(jarDir, "lib").isDirectory()) {
+                        return jarDir.getPath();
+                    }
+
+                    // mx: mxbuild/dists/ruby.jar
+                    if (jarDir.getName().equals("dists") && jarDir.getParentFile().getName().equals("mxbuild")) {
+                        String mxbuildDir = currentJarFile.getParentFile().getParent();
+                        File mxJRubyHome = new File(mxbuildDir, "ruby-zip-extracted");
+                        if (mxJRubyHome.isDirectory()) {
+                            return mxJRubyHome.getPath();
+                        }
+                    }
+                }
+            }
+        }
+
+        return instanceConfig.getJRubyHome();
     }
 
     public Object send(Object object, String methodName, DynamicObject block, Object... arguments) {
@@ -246,14 +302,6 @@ public class RubyContext extends ExecutionContext {
         return nativePlatform;
     }
 
-    public JRubyInterop getJRubyInterop() {
-        return jrubyInterop;
-    }
-
-    public Ruby getJRubyRuntime() {
-        return jrubyRuntime;
-    }
-
     public CoreLibrary getCoreLibrary() {
         return coreLibrary;
     }
@@ -307,20 +355,12 @@ public class RubyContext extends ExecutionContext {
         return coverageManager;
     }
 
-    public static RubyContext getLatestInstance() {
-        return latestInstance;
-    }
-
-    public AttachmentsManager getAttachmentsManager() {
-        return attachmentsManager;
+    public static RubyContext getInstance() {
+        return RubyLanguage.INSTANCE.unprotectedFindContext(RubyLanguage.INSTANCE.unprotectedCreateFindContextNode());
     }
 
     public SourceLoader getSourceLoader() {
         return sourceLoader;
-    }
-
-    public SourceCache getSourceCache() {
-        return sourceCache;
     }
 
     public RopeTable getRopeTable() {
@@ -371,4 +411,51 @@ public class RubyContext extends ExecutionContext {
         return encodingManager;
     }
 
+    public String getCurrentDirectory() {
+        return currentDirectory;
+    }
+
+    public void setCurrentDirectory(String currentDirectory) {
+        this.currentDirectory = currentDirectory;
+    }
+
+    public RubyInstanceConfig getInstanceConfig() {
+        return instanceConfig;
+    }
+
+    public void setOriginalInputFile(String originalInputFile) {
+        this.originalInputFile = originalInputFile;
+    }
+
+    public String getOriginalInputFile() {
+        return originalInputFile;
+    }
+
+    public String getJRubyHome() {
+        return jrubyHome;
+    }
+
+    public void setVerbose(boolean verbose) {
+        this.verbose = verbose;
+    }
+
+    public void setVerboseNil() {
+        verbose = false;
+    }
+
+    public boolean warningsEnabled() {
+        return verbose;
+    }
+
+    public boolean isVerbose() {
+        return verbose;
+    }
+
+    public InputStream getSyntaxCheckInputStream() {
+        return syntaxCheckInputStream;
+    }
+
+    public void setSyntaxCheckInputStream(InputStream syntaxCheckInputStream) {
+        this.syntaxCheckInputStream = syntaxCheckInputStream;
+    }
 }

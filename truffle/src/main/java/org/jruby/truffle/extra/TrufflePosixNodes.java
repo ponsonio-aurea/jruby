@@ -9,6 +9,8 @@
  */
 package org.jruby.truffle.extra;
 
+import com.kenai.jffi.Platform;
+import com.kenai.jffi.Platform.OS;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Cached;
@@ -17,30 +19,24 @@ import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.object.DynamicObject;
 import com.oracle.truffle.api.profiles.BranchProfile;
 import com.oracle.truffle.api.source.SourceSection;
+import com.sun.security.auth.module.UnixSystem;
 import jnr.constants.platform.Fcntl;
 import jnr.ffi.Pointer;
 import org.jcodings.specific.UTF8Encoding;
-import org.jruby.platform.Platform;
 import org.jruby.truffle.Layouts;
 import org.jruby.truffle.RubyContext;
 import org.jruby.truffle.builtins.CoreClass;
 import org.jruby.truffle.builtins.CoreMethod;
 import org.jruby.truffle.builtins.CoreMethodArrayArgumentsNode;
-import org.jruby.truffle.core.rope.CodeRange;
-import org.jruby.truffle.core.rope.LeafRope;
 import org.jruby.truffle.core.rope.RopeNodes;
 import org.jruby.truffle.core.rope.RopeNodesFactory;
 import org.jruby.truffle.core.string.StringOperations;
 import org.jruby.truffle.core.time.GetTimeZoneNode;
 import org.jruby.truffle.extra.ffi.PointerPrimitiveNodes;
-import org.jruby.truffle.language.NotProvided;
 import org.jruby.truffle.language.SnippetNode;
 import org.jruby.truffle.language.control.RaiseException;
-import org.jruby.truffle.language.objects.AllocateObjectNode;
 import org.jruby.truffle.platform.UnsafeGroup;
 import org.jruby.truffle.platform.signal.Signal;
-
-import java.nio.charset.StandardCharsets;
 
 import static org.jruby.truffle.core.string.StringOperations.decodeUTF8;
 
@@ -95,22 +91,6 @@ public abstract class TrufflePosixNodes {
             return posix().dup(descriptor);
         }
 
-    }
-
-    @CoreMethod(names = "environ", isModuleFunction = true, unsafe = {UnsafeGroup.MEMORY, UnsafeGroup.PROCESSES})
-    public abstract static class EnvironNode extends CoreMethodArrayArgumentsNode {
-
-        @Child private AllocateObjectNode allocateObjectNode;
-
-        public EnvironNode(RubyContext context, SourceSection sourceSection) {
-            super(context, sourceSection);
-            allocateObjectNode = AllocateObjectNode.create();
-        }
-
-        @Specialization
-        public DynamicObject environ() {
-            return allocateObjectNode.allocate(coreLibrary().getRubiniusFFIPointerClass(), posix().environ());
-        }
     }
 
     @CoreMethod(names = "fchmod", isModuleFunction = true, required = 2, lowerFixnum = {1, 2}, unsafe = UnsafeGroup.IO)
@@ -194,27 +174,27 @@ public abstract class TrufflePosixNodes {
     @CoreMethod(names = "getgroups", isModuleFunction = true, required = 2, lowerFixnum = 1, unsafe = {UnsafeGroup.MEMORY, UnsafeGroup.PROCESSES})
     public abstract static class GetGroupsNode extends CoreMethodArrayArgumentsNode {
 
+        @TruffleBoundary
         @Specialization(guards = "isNil(pointer)")
         public int getGroupsNil(int max, DynamicObject pointer) {
-            return Platform.getPlatform().getGroups(null).length;
+            return getGroups().length;
         }
 
-        @CompilerDirectives.TruffleBoundary
+        @TruffleBoundary
         @Specialization(guards = "isRubyPointer(pointer)")
         public int getGroups(int max, DynamicObject pointer) {
-            final long[] groups = Platform.getPlatform().getGroups(null);
-
             final Pointer pointerValue = Layouts.POINTER.getPointer(pointer);
-
-            for (int n = 0; n < groups.length && n < max; n++) {
-                // TODO CS 16-May-15 this is platform dependent
+            final long[] groups = getGroups();
+            for (int n = 0; n < groups.length; n++) {
                 pointerValue.putInt(4 * n, (int) groups[n]);
-
             }
-
             return groups.length;
         }
 
+        @TruffleBoundary
+        private static long[] getGroups() {
+            return new UnixSystem().getGroups();
+        }
     }
 
     @CoreMethod(names = "getrlimit", isModuleFunction = true, required = 2, lowerFixnum = 1, unsafe = {UnsafeGroup.PROCESSES, UnsafeGroup.MEMORY})
@@ -267,17 +247,6 @@ public abstract class TrufflePosixNodes {
         @Specialization(guards = "isRubyString(path)")
         public int mkfifo(DynamicObject path, int mode) {
             return posix().mkfifo(StringOperations.getString(path), mode);
-        }
-
-    }
-
-    @CoreMethod(names = "putenv", isModuleFunction = true, required = 1, unsafe = UnsafeGroup.PROCESSES)
-    public abstract static class PutenvNode extends CoreMethodArrayArgumentsNode {
-
-        @CompilerDirectives.TruffleBoundary
-        @Specialization(guards = "isRubyString(nameValuePair)")
-        public int putenv(DynamicObject nameValuePair) {
-            throw new UnsupportedOperationException("Not yet implemented in jnr-posix");
         }
 
     }
@@ -406,7 +375,7 @@ public abstract class TrufflePosixNodes {
 
             if (result == 0) {
                 final String cwd = posix().getcwd();
-                getContext().getJRubyRuntime().setCurrentDirectory(cwd);
+                getContext().setCurrentDirectory(cwd);
             }
 
             return result;
@@ -545,22 +514,30 @@ public abstract class TrufflePosixNodes {
 
     }
 
-    @CoreMethod(names = "major", isModuleFunction = true, required = 1, lowerFixnum = 1, unsafe = UnsafeGroup.IO)
+    @CoreMethod(names = "major", isModuleFunction = true, required = 1, unsafe = UnsafeGroup.IO)
     public abstract static class MajorNode extends CoreMethodArrayArgumentsNode {
 
         @Specialization
-        public int major(int dev) {
-            return (dev >> 24) & 255;
-        }
+        public int major(long dev) {
+            if (Platform.getPlatform().getOS() == OS.SOLARIS) {
+                return (int) (dev >> 32); // Solaris has major number in the upper 32 bits.
+            } else {
+                return (int) ((dev >> 24) & 0xff);
 
+            }
+        }
     }
 
-    @CoreMethod(names = "minor", isModuleFunction = true, required = 1, lowerFixnum = 1, unsafe = UnsafeGroup.IO)
+    @CoreMethod(names = "minor", isModuleFunction = true, required = 1, unsafe = UnsafeGroup.IO)
     public abstract static class MinorNode extends CoreMethodArrayArgumentsNode {
 
         @Specialization
-        public int minor(int dev) {
-            return (dev & 16777215);
+        public int minor(long dev) {
+            if (Platform.getPlatform().getOS() == OS.SOLARIS) {
+                return (int) dev; // Solaris has minor number in the lower 32 bits.
+            } else {
+                return (int) (dev & 0xffffff);
+            }
         }
 
     }
@@ -601,7 +578,7 @@ public abstract class TrufflePosixNodes {
         @Specialization
         public DynamicObject getcwd() {
             final String cwd = posix().getcwd();
-            final String path = getContext().getJRubyRuntime().getCurrentDirectory();
+            final String path = getContext().getCurrentDirectory();
             assert path.equals(cwd);
 
             // TODO (nirvdrum 12-Sept-16) The rope table always returns UTF-8, but this call should be based on Encoding.default_external and reflect updates to that value.
@@ -684,6 +661,17 @@ public abstract class TrufflePosixNodes {
         @Specialization
         public int getppid() {
             return posix().getppid();
+        }
+
+    }
+
+    @CoreMethod(names = "send", isModuleFunction = true, required = 4, lowerFixnum = {1, 3, 4}, unsafe = UnsafeGroup.IO)
+    public abstract static class SendNode extends CoreMethodArrayArgumentsNode {
+
+        @TruffleBoundary
+        @Specialization(guards = "isRubyPointer(buffer)")
+        public int send(int descriptor, DynamicObject buffer, int bytes, int flags) {
+            return nativeSockets().send(descriptor, Layouts.POINTER.getPointer(buffer), bytes, flags);
         }
 
     }

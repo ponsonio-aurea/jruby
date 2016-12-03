@@ -38,11 +38,9 @@
 package org.jruby.truffle.core;
 
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.TruffleOptions;
 import com.oracle.truffle.api.dsl.Cached;
-import com.oracle.truffle.api.dsl.CreateCast;
 import com.oracle.truffle.api.dsl.Fallback;
-import com.oracle.truffle.api.dsl.NodeChild;
-import com.oracle.truffle.api.dsl.NodeChildren;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.object.DynamicObject;
@@ -59,15 +57,11 @@ import org.jruby.truffle.builtins.Primitive;
 import org.jruby.truffle.builtins.PrimitiveArrayArgumentsNode;
 import org.jruby.truffle.core.basicobject.BasicObjectNodes.ReferenceEqualNode;
 import org.jruby.truffle.core.cast.NameToJavaStringNode;
-import org.jruby.truffle.core.cast.NameToSymbolOrStringNodeGen;
 import org.jruby.truffle.core.kernel.KernelNodes;
 import org.jruby.truffle.core.kernel.KernelNodesFactory;
-import org.jruby.truffle.core.module.ModuleOperations;
 import org.jruby.truffle.core.proc.ProcSignalHandler;
 import org.jruby.truffle.core.string.StringOperations;
-import org.jruby.truffle.core.thread.ThreadManager;
 import org.jruby.truffle.language.RubyGuards;
-import org.jruby.truffle.language.RubyNode;
 import org.jruby.truffle.language.control.ExitException;
 import org.jruby.truffle.language.control.RaiseException;
 import org.jruby.truffle.language.control.ThrowException;
@@ -80,6 +74,7 @@ import org.jruby.truffle.language.objects.IsANode;
 import org.jruby.truffle.language.objects.IsANodeGen;
 import org.jruby.truffle.language.objects.LogicalClassNode;
 import org.jruby.truffle.language.objects.LogicalClassNodeGen;
+import org.jruby.truffle.language.objects.shared.SharedObjects;
 import org.jruby.truffle.language.yield.YieldNode;
 import org.jruby.truffle.platform.UnsafeGroup;
 import org.jruby.truffle.platform.signal.Signal;
@@ -455,6 +450,11 @@ public abstract class VMPrimitiveNodes {
 
         @TruffleBoundary
         private boolean handleDefault(DynamicObject signalName) {
+            // We can't work with signals with AOT.
+            if (TruffleOptions.AOT) {
+                return true;
+            }
+
             Signal signal = getContext().getNativePlatform().getSignalManager().createSignal(signalName.toString());
             try {
                 getContext().getNativePlatform().getSignalManager().watchDefaultForSignal(signal);
@@ -466,6 +466,11 @@ public abstract class VMPrimitiveNodes {
 
         @TruffleBoundary
         private boolean handle(DynamicObject signalName, SignalHandler newHandler) {
+            // We can't work with signals with AOT.
+            if (TruffleOptions.AOT) {
+                return true;
+            }
+
             Signal signal = getContext().getNativePlatform().getSignalManager().createSignal(signalName.toString());
             try {
                 getContext().getNativePlatform().getSignalManager().watchSignal(signal, newHandler);
@@ -483,6 +488,9 @@ public abstract class VMPrimitiveNodes {
         @TruffleBoundary
         @Specialization(guards = "isRubyString(key)")
         public Object get(DynamicObject key) {
+            // Sharing: we do not need to share here as it's only called by the main thread
+            assert getContext().getThreadManager().getCurrentThread() == getContext().getThreadManager().getRootThread();
+
             final Object value = getContext().getNativePlatform().getRubiniusConfiguration().get(key.toString());
 
             if (value == null) {
@@ -542,12 +550,12 @@ public abstract class VMPrimitiveNodes {
 
             final int finalOptions = options;
 
-            // retry:
-            pid = getContext().getThreadManager().runUntilResult(this, new ThreadManager.BlockingAction<Integer>() {
-                @Override
-                public Integer block() throws InterruptedException {
-                    return posix().waitpid(input_pid, statusReference, finalOptions);
+            pid = getContext().getThreadManager().runUntilResult(this, () -> {
+                int result = posix().waitpid(input_pid, statusReference, finalOptions);
+                if (result == -1 && posix().errno() == EINTR.intValue()) {
+                    throw new InterruptedException();
                 }
+                return result;
             });
 
             final int errno = posix().errno();
@@ -555,11 +563,6 @@ public abstract class VMPrimitiveNodes {
             if (pid == -1) {
                 if (errno == ECHILD.intValue()) {
                     return false;
-                }
-                if (errno == EINTR.intValue()) {
-                    throw new UnsupportedOperationException();
-                    //if(!state->check_async(calling_environment)) return NULL;
-                    //goto retry;
                 }
 
                 // TODO handle other errnos?
@@ -595,9 +598,27 @@ public abstract class VMPrimitiveNodes {
 
         @Specialization(guards = "isRubyClass(newClass)")
         public DynamicObject setClass(DynamicObject object, DynamicObject newClass) {
-            Layouts.BASIC_OBJECT.setLogicalClass(object, newClass);
-            Layouts.BASIC_OBJECT.setMetaClass(object, newClass);
+            SharedObjects.propagate(object, newClass);
+            synchronized (object) {
+                Layouts.BASIC_OBJECT.setLogicalClass(object, newClass);
+                Layouts.BASIC_OBJECT.setMetaClass(object, newClass);
+            }
             return object;
+        }
+
+    }
+
+    @Primitive(name = "vm_set_process_title", needsSelf = false)
+    public abstract static class VMSetProcessTitleNode extends PrimitiveArrayArgumentsNode {
+
+        @TruffleBoundary
+        @Specialization(guards = "isRubyString(name)")
+        protected Object writeProgramName(DynamicObject name) {
+            if (getContext().getNativePlatform().getProcessName().canSet()) {
+                getContext().getNativePlatform().getProcessName().set(name.toString());
+            }
+
+            return name;
         }
 
     }

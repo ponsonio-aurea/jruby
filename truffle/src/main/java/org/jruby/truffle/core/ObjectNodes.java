@@ -11,8 +11,8 @@ package org.jruby.truffle.core;
 
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.dsl.Cached;
+import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.Specialization;
-import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.object.DynamicObject;
 import com.oracle.truffle.api.profiles.ConditionProfile;
 import com.oracle.truffle.api.source.SourceSection;
@@ -42,10 +42,10 @@ public abstract class ObjectNodes {
     @Primitive(name = "object_id")
     public abstract static class ObjectIDPrimitiveNode extends PrimitiveArrayArgumentsNode {
 
-        public abstract Object executeObjectID(VirtualFrame frame, Object value);
+        public abstract Object executeObjectID(Object value);
 
         @Specialization(guards = "isNil(nil)")
-        public long objectID(Object nil) {
+        public long objectIDNil(Object nil) {
             return ObjectIDOperations.NIL;
         }
 
@@ -97,6 +97,11 @@ public abstract class ObjectNodes {
             }
 
             return id;
+        }
+
+        @Fallback
+        public long objectID(Object object) {
+            return Integer.toUnsignedLong(object.hashCode());
         }
 
         protected ReadObjectFieldNode createReadObjectIDNode() {

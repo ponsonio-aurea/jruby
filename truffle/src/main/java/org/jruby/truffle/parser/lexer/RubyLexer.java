@@ -44,9 +44,14 @@
 package org.jruby.truffle.parser.lexer;
 
 import org.jcodings.Encoding;
-import org.jruby.Ruby;
+import org.joni.Matcher;
+import org.joni.Option;
 import org.jruby.common.IRubyWarnings;
 import org.jruby.common.IRubyWarnings.ID;
+import org.jruby.truffle.Layouts;
+import org.jruby.truffle.RubyContext;
+import org.jruby.truffle.core.regexp.ClassicRegexp;
+import org.jruby.truffle.language.control.RaiseException;
 import org.jruby.truffle.parser.ast.BackRefParseNode;
 import org.jruby.truffle.parser.ast.BignumParseNode;
 import org.jruby.truffle.parser.ast.ComplexParseNode;
@@ -201,7 +206,7 @@ public class RubyLexer extends LexingCommon {
     }
     
     public static Keyword getKeyword(String str) {
-        return (Keyword) map.get(str);
+        return map.get(str);
     }
     
     // Used for tiny smidgen of grammar in lexer (see setParserSupport())
@@ -398,11 +403,11 @@ public class RubyLexer extends LexingCommon {
     }
 
     protected void setEncoding(ByteList name) {
-        Ruby runtime = parserSupport.getConfiguration().getRuntime();
-        Encoding newEncoding = runtime.getEncodingService().loadEncoding(name);
+        final RubyContext context = parserSupport.getConfiguration().getContext();
+        Encoding newEncoding = Layouts.ENCODING.getEncoding(context.getEncodingManager().getRubyEncoding(name.toString()));
 
-        if (newEncoding == null) throw runtime.newArgumentError("unknown encoding name: " + name.toString());
-        if (!newEncoding.isAsciiCompatible()) throw runtime.newArgumentError(name.toString() + " is not ASCII compatible");
+        if (newEncoding == null) throw new RaiseException(context.getCoreExceptions().argumentError("unknown encoding name: " + name.toString(), null));
+        if (!newEncoding.isAsciiCompatible()) throw new RaiseException(context.getCoreExceptions().argumentError(name.toString() + " is not ASCII compatible", null));
 
         setEncoding(newEncoding);
     }
@@ -821,6 +826,7 @@ public class RubyLexer extends LexingCommon {
      *
      *@return    Description of the Returned Value
      */
+    @SuppressWarnings("fallthrough")
     private int yylex() throws IOException {
         int c;
         boolean spaceSeen = false;
@@ -870,7 +876,7 @@ public class RubyLexer extends LexingCommon {
                 continue;
             case '#': {	/* it's a comment */
                 this.tokenSeen = tokenSeen;
-                if (!parseMagicComment(parserSupport.getConfiguration().getRuntime(), lexb.makeShared(lex_p, lex_pend - lex_p))) {
+                if (!parseMagicComment(lexb.makeShared(lex_p, lex_pend - lex_p))) {
                     if (comment_at_top()) set_file_encoding(lex_p, lex_pend);
                 }
                 lex_p = lex_pend;
@@ -1115,6 +1121,45 @@ public class RubyLexer extends LexingCommon {
         return c;
     }
 
+    // MRI: parser_magic_comment
+    public boolean parseMagicComment(ByteList magicLine) throws IOException {
+        int length = magicLine.length();
+
+        if (length <= 7) return false;
+        int beg = magicCommentMarker(magicLine, 0);
+        if (beg >= 0) {
+            int end = magicCommentMarker(magicLine, beg);
+            if (end < 0) return false;
+            length = end - beg - 3; // -3 is to backup over end just found
+        } else {
+            beg = 0;
+        }
+
+        int begin = magicLine.getBegin() + beg;
+        Matcher matcher = magicRegexp.matcher(magicLine.unsafeBytes(), begin, begin + length);
+        int result = ClassicRegexp.matcherSearch(matcher, begin, begin + length, Option.NONE);
+
+        if (result < 0) return false;
+
+        // Regexp is guaranteed to have three matches
+        int begs[] = matcher.getRegion().beg;
+        int ends[] = matcher.getRegion().end;
+        String name = magicLine.subSequence(beg + begs[1], beg + ends[1]).toString().replace('-', '_');
+        ByteList value = magicLine.makeShared(beg + begs[2], ends[2] - begs[2]);
+
+        if ("coding".equals(name) || "encoding".equals(name)) {
+            magicCommentEncoding(value);
+        } else if ("frozen_string_literal".equals(name)) {
+            setCompileOptionFlag(name, value);
+        } else if ("warn_indent".equals(name)) {
+            setTokenInfo(name, value);
+        } else {
+            return false;
+        }
+
+        return true;
+    }
+
     private int at() throws IOException {
         newtok(true);
         int c = nextc();
@@ -1275,6 +1320,7 @@ public class RubyLexer extends LexingCommon {
         return Tokens.kDO;
     }
 
+    @SuppressWarnings("fallthrough")
     private int dollar() throws IOException {
         setState(EXPR_END);
         newtok(true);
@@ -2092,6 +2138,7 @@ public class RubyLexer extends LexingCommon {
      *@param c The first character of the number.
      *@return A int constant wich represents a token.
      */
+    @SuppressWarnings("fallthrough")
     private int parseNumber(int c) throws IOException {
         setState(EXPR_END);
         newtok(true);
@@ -2367,8 +2414,8 @@ public class RubyLexer extends LexingCommon {
             buffer.append((char) codepoint);
         }
     }
- 
-    
+
+    @SuppressWarnings("fallthrough")
     public int readEscape() throws IOException {
         int c = nextc();
 

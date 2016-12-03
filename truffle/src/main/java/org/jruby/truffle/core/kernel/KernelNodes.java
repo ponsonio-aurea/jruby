@@ -13,6 +13,7 @@ import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.Truffle;
+import com.oracle.truffle.api.TruffleOptions;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.CreateCast;
 import com.oracle.truffle.api.dsl.ImportStatic;
@@ -32,6 +33,7 @@ import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.nodes.UnexpectedResultException;
 import com.oracle.truffle.api.object.DynamicObject;
 import com.oracle.truffle.api.object.Property;
+import com.oracle.truffle.api.object.Shape;
 import com.oracle.truffle.api.profiles.BranchProfile;
 import com.oracle.truffle.api.profiles.ConditionProfile;
 import com.oracle.truffle.api.source.Source;
@@ -39,8 +41,6 @@ import com.oracle.truffle.api.source.SourceSection;
 import jnr.constants.platform.Errno;
 import org.jcodings.Encoding;
 import org.jcodings.specific.UTF8Encoding;
-import org.jruby.common.IRubyWarnings;
-import org.jruby.runtime.Helpers;
 import org.jruby.runtime.Visibility;
 import org.jruby.truffle.Layouts;
 import org.jruby.truffle.RubyContext;
@@ -51,6 +51,7 @@ import org.jruby.truffle.builtins.CoreMethodNode;
 import org.jruby.truffle.builtins.Primitive;
 import org.jruby.truffle.builtins.PrimitiveArrayArgumentsNode;
 import org.jruby.truffle.builtins.UnaryCoreMethodNode;
+import org.jruby.truffle.core.Hashing;
 import org.jruby.truffle.core.ObjectNodes;
 import org.jruby.truffle.core.ObjectNodesFactory;
 import org.jruby.truffle.core.array.ArrayUtils;
@@ -67,7 +68,6 @@ import org.jruby.truffle.core.cast.TaintResultNode;
 import org.jruby.truffle.core.cast.ToPathNodeGen;
 import org.jruby.truffle.core.cast.ToStrNode;
 import org.jruby.truffle.core.cast.ToStrNodeGen;
-import org.jruby.truffle.core.encoding.EncodingOperations;
 import org.jruby.truffle.core.format.BytesResult;
 import org.jruby.truffle.core.format.FormatExceptionTranslator;
 import org.jruby.truffle.core.format.exceptions.FormatException;
@@ -90,11 +90,11 @@ import org.jruby.truffle.core.rope.RopeOperations;
 import org.jruby.truffle.core.string.StringCachingGuards;
 import org.jruby.truffle.core.string.StringOperations;
 import org.jruby.truffle.core.symbol.SymbolTable;
-import org.jruby.truffle.core.thread.ThreadManager.BlockingAction;
 import org.jruby.truffle.language.NotProvided;
 import org.jruby.truffle.language.RubyGuards;
 import org.jruby.truffle.language.RubyNode;
 import org.jruby.truffle.language.RubyRootNode;
+import org.jruby.truffle.language.SnippetNode;
 import org.jruby.truffle.language.arguments.RubyArguments;
 import org.jruby.truffle.language.backtrace.Activation;
 import org.jruby.truffle.language.backtrace.Backtrace;
@@ -130,12 +130,14 @@ import org.jruby.truffle.language.objects.ObjectIVarGetNode;
 import org.jruby.truffle.language.objects.ObjectIVarGetNodeGen;
 import org.jruby.truffle.language.objects.ObjectIVarSetNode;
 import org.jruby.truffle.language.objects.ObjectIVarSetNodeGen;
+import org.jruby.truffle.language.objects.PropertyFlags;
 import org.jruby.truffle.language.objects.SingletonClassNode;
 import org.jruby.truffle.language.objects.SingletonClassNodeGen;
 import org.jruby.truffle.language.objects.TaintNode;
 import org.jruby.truffle.language.objects.TaintNodeGen;
 import org.jruby.truffle.language.objects.WriteObjectFieldNode;
 import org.jruby.truffle.language.objects.WriteObjectFieldNodeGen;
+import org.jruby.truffle.language.objects.shared.SharedObjects;
 import org.jruby.truffle.language.threadlocal.ThreadLocalObject;
 import org.jruby.truffle.parser.ParserContext;
 import org.jruby.truffle.parser.TranslatorDriver;
@@ -143,15 +145,19 @@ import org.jruby.truffle.platform.UnsafeGroup;
 import org.jruby.truffle.util.StringUtils;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.lang.ProcessBuilder.Redirect;
-import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
+
+import static org.jruby.truffle.core.array.ArrayHelpers.getStore;
 
 @CoreClass("Kernel")
 public abstract class KernelNodes {
@@ -159,8 +165,34 @@ public abstract class KernelNodes {
     @CoreMethod(names = "`", isModuleFunction = true, required = 1, unsafe = { UnsafeGroup.IO, UnsafeGroup.PROCESSES })
     public abstract static class BacktickNode extends CoreMethodArrayArgumentsNode {
 
+        private static class ExecuteResult {
+
+            private final DynamicObject output;
+            private final int pid;
+            private final int code;
+
+            public ExecuteResult(DynamicObject output, int pid, int code) {
+                this.output = output;
+                this.pid = pid;
+                this.code = code;
+            }
+
+            public DynamicObject getOutput() {
+                return output;
+            }
+
+            public int getPid() {
+                return pid;
+            }
+
+            public int getCode() {
+                return code;
+            }
+        }
+
         @Child private CallDispatchHeadNode toHashNode;
         @Child private ToStrNode toStrNode;
+        @Child private SnippetNode setStatusNode = new SnippetNode();
 
         @Specialization(guards = "!isRubyString(command)")
         public DynamicObject backtickCoerce(VirtualFrame frame, DynamicObject command) {
@@ -184,11 +216,22 @@ public abstract class KernelNodes {
             final DynamicObject env = getContext().getCoreLibrary().getENV();
             final DynamicObject envAsHash = (DynamicObject) toHashNode.call(frame, env, "to_hash");
 
-            return spawnAndCaptureOutput(command, envAsHash);
+            final ExecuteResult result = spawnAndCaptureOutput(command, envAsHash);
+
+            setStatusNode.execute(frame,
+                    "Rubinius::Mirror::Process.set_status_global Process::Status.new(pid, code)",
+                    "pid", result.getPid(),
+                    "code", result.getCode());
+
+            return result.output;
         }
 
         @TruffleBoundary
-        private DynamicObject spawnAndCaptureOutput(DynamicObject command, final DynamicObject envAsHash) {
+        private ExecuteResult spawnAndCaptureOutput(DynamicObject command, final DynamicObject envAsHash) {
+            if (TruffleOptions.AOT) {
+                throw new UnsupportedOperationException("ProcessEnvironment.environment not supported with AOT");
+            }
+
             // We need to run via bash to get the variable and other expansion we expect
             String[] cmdArray = new String[] { "bash", "-c", command.toString() };
 
@@ -209,24 +252,30 @@ public abstract class KernelNodes {
             }
 
             final InputStream stdout = process.getInputStream();
-            final InputStreamReader reader = new InputStreamReader(stdout, StandardCharsets.UTF_8);
 
-            final StringBuilder resultBuilder = new StringBuilder();
+            final ByteArrayOutputStream baos = new ByteArrayOutputStream();
 
-            // TODO(cs): this isn't great for binary output
-
+            final int bufferSize = 1024;
+            final byte[] buffer = new byte[bufferSize];
+            int bytesRead = 0;
             try {
-                int c;
-
-                while ((c = reader.read()) != -1) {
-                    resultBuilder.append((char) c);
+                while ((bytesRead = stdout.read(buffer, 0, bufferSize)) != -1) {
+                    baos.write(buffer, 0, bytesRead);
                 }
             } catch (IOException e) {
                 throw new JavaException(e);
             }
 
-            // TODO (nirvdrum 10-Mar-15) This should be using the default external encoding, rather than hard-coded to UTF-8.
-            return createString(StringOperations.encodeRope(resultBuilder.toString(), EncodingOperations.getEncoding(getContext().getEncodingManager().getRubyEncoding("UTF-8"))));
+            final int code = getContext().getThreadManager().runUntilResult(this, () -> process.waitFor());
+            final DynamicObject output = createString(baos.toByteArray(), getContext().getEncodingManager().getDefaultExternalEncoding());
+
+            // TODO CS 30-Oct-16 how to get the PID? JRuby does some gymnastics with reflection. I think we
+            // should probably reimplement this in Ruby using spawn, which starts processes with JNR and so
+            // has proper access to things like the PID.
+
+            final int pid = 0;
+
+            return new ExecuteResult(output, pid, code);
         }
 
     }
@@ -261,6 +310,35 @@ public abstract class KernelNodes {
             }
 
             return equalNode.callBoolean(frame, left, "==", null, right);
+        }
+
+    }
+
+    /** Check if operands are the same object or call #eql? */
+    public abstract static class SameOrEqlNode extends CoreMethodArrayArgumentsNode {
+
+        @Child private CallDispatchHeadNode eqlNode;
+
+        private final ConditionProfile sameProfile = ConditionProfile.createBinaryProfile();
+
+        public abstract boolean executeSameOrEql(VirtualFrame frame, Object a, Object b);
+
+        @Specialization
+        public boolean sameOrEql(VirtualFrame frame, Object a, Object b,
+                        @Cached("create()") ReferenceEqualNode referenceEqualNode) {
+            if (sameProfile.profile(referenceEqualNode.executeReferenceEqual(a, b))) {
+                return true;
+            } else {
+                return areEql(frame, a, b);
+            }
+        }
+
+        private boolean areEql(VirtualFrame frame, Object left, Object right) {
+            if (eqlNode == null) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                eqlNode = insert(DispatchHeadNodeFactory.createMethodCall(getContext()));
+            }
+            return eqlNode.callBoolean(frame, left, "eql?", null, right);
         }
 
     }
@@ -399,6 +477,7 @@ public abstract class KernelNodes {
 
         @TruffleBoundary
         private void copyInstanceVariables(DynamicObject from, DynamicObject to) {
+            // Concurrency: OK if callers create the object and publish it after copy
             for (Property property : from.getShape().getProperties()) {
                 if (property.getKey() instanceof String) {
                     to.define(property.getKey(), property.get(from, from.getShape()), 0);
@@ -693,6 +772,10 @@ public abstract class KernelNodes {
 
         @Specialization
         public Object exec(VirtualFrame frame, Object command, Object[] args) {
+            if (TruffleOptions.AOT) {
+                throw new UnsupportedOperationException("ProcessEnvironment.environment not supported with AOT.");
+            }
+
             if (toHashNode == null) {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
                 toHashNode = insert(DispatchHeadNodeFactory.createMethodCall(getContext()));
@@ -710,12 +793,23 @@ public abstract class KernelNodes {
 
         @TruffleBoundary
         private String[] buildCommandLine(Object command, Object[] args) {
-            final String[] commandLine = new String[1 + args.length];
-            commandLine[0] = command.toString();
-            for (int n = 0; n < args.length; n++) {
-                commandLine[1 + n] = args[n].toString();
+            final List<String> commandLine = new ArrayList<>(1 + args.length);
+            if (RubyGuards.isRubyArray(command)) {
+                // For handling: exec([cmdname, argv0], arg1, ...)
+                // argv0 not yet implemented
+                final Object[] store = (Object[]) getStore((DynamicObject) command);
+                commandLine.add(store[0].toString());
+            } else {
+                commandLine.add(command.toString());
             }
-            return commandLine;
+            for (int n = 0; n < args.length; n++) {
+                if (n == args.length - 1 && RubyGuards.isRubyHash(args[n])) {
+                    break;
+                }
+                commandLine.add(args[n].toString());
+            }
+            final String[] result = new String[commandLine.size()];
+            return commandLine.toArray(result);
         }
 
         @TruffleBoundary
@@ -742,12 +836,7 @@ public abstract class KernelNodes {
                 }
             }
 
-            int exitCode = context.getThreadManager().runUntilResult(this, new BlockingAction<Integer>() {
-                @Override
-                public Integer block() throws InterruptedException {
-                    return process.waitFor();
-                }
-            });
+            int exitCode = context.getThreadManager().runUntilResult(this, () -> process.waitFor());
 
             /*
              * We really do want to just exit here as opposed to throwing a MainExitException and tidying up, as we're
@@ -755,19 +844,6 @@ public abstract class KernelNodes {
              */
 
             System.exit(exitCode);
-        }
-
-    }
-
-    @CoreMethod(names = "fork", isModuleFunction = true, rest = true, unsafe = UnsafeGroup.PROCESSES)
-    public abstract static class ForkNode extends CoreMethodArrayArgumentsNode {
-
-        @TruffleBoundary
-        @Specialization
-        public Object fork(Object[] args) {
-            final SourceSection sourceSection = getContext().getCallStack().getTopMostUserCallNode().getEncapsulatingSourceSection();
-            getContext().getJRubyRuntime().getWarnings().warn(IRubyWarnings.ID.TRUFFLE, sourceSection.getSource().getName(), sourceSection.getStartLine(), "Kernel#fork not implemented - defined to satisfy some metaprogramming in RubySpec");
-            return nil();
         }
 
     }
@@ -813,18 +889,13 @@ public abstract class KernelNodes {
         @Specialization
         public DynamicObject gets() {
             // TODO(CS): having some trouble interacting with JRuby stdin - so using this hack
-            final InputStream in = getContext().getJRubyRuntime().getInstanceConfig().getInput();
+            final InputStream in = getContext().getInstanceConfig().getInput();
 
-            Encoding encoding = getContext().getJRubyRuntime().getDefaultExternalEncoding();
+            Encoding encoding = getContext().getEncodingManager().getDefaultExternalEncoding();
 
             final BufferedReader reader = new BufferedReader(new InputStreamReader(in, encoding.getCharset()));
 
-            final String line = getContext().getThreadManager().runUntilResult(this, new BlockingAction<String>() {
-                @Override
-                public String block() throws InterruptedException {
-                    return gets(reader);
-                }
-            });
+            final String line = getContext().getThreadManager().runUntilResult(this, () -> gets(reader));
 
             final DynamicObject rubyLine = createString(StringOperations.encodeRope(line, UTF8Encoding.INSTANCE));
 
@@ -859,16 +930,12 @@ public abstract class KernelNodes {
 
         @Specialization
         public long hash(int value) {
-            long h = Helpers.hashStart(getContext().getJRubyRuntime(), MURMUR_SEED);
-            h = Helpers.murmurCombine(h, value);
-            return Helpers.hashEnd(h);
+            return Hashing.hash(MURMUR_SEED, value);
         }
 
         @Specialization
         public long hash(long value) {
-            long h = Helpers.hashStart(getContext().getJRubyRuntime(), MURMUR_SEED);
-            h = Helpers.murmurCombine(h, value);
-            return Helpers.hashEnd(h);
+            return Hashing.hash(MURMUR_SEED, value);
         }
 
         @Specialization
@@ -959,7 +1026,8 @@ public abstract class KernelNodes {
         @Specialization
         public boolean isInstanceVariableDefined(DynamicObject object, String name) {
             final String ivar = SymbolTable.checkInstanceVariableName(getContext(), name, object, this);
-            return object.getShape().hasProperty(ivar);
+            final Property property = object.getShape().getProperty(ivar);
+            return PropertyFlags.isDefined(property);
         }
 
     }
@@ -1030,12 +1098,29 @@ public abstract class KernelNodes {
         public Object removeInstanceVariable(DynamicObject object, String name) {
             final String ivar = SymbolTable.checkInstanceVariableName(getContext(), name, object, this);
             final Object value = object.get(ivar, nil());
-            if (!object.delete(name)) {
-                throw new RaiseException(coreExceptions().nameErrorInstanceVariableNotDefined(name, object, this));
+
+            if (SharedObjects.isShared(object)) {
+                synchronized (object) {
+                    removeField(object, name);
+                }
+            } else {
+                if (!object.delete(name)) {
+                    throw new RaiseException(coreExceptions().nameErrorInstanceVariableNotDefined(name, object, this));
+                }
             }
             return value;
         }
 
+        private void removeField(DynamicObject object, String name) {
+            Shape shape = object.getShape();
+            Property property = shape.getProperty(name);
+            if (!PropertyFlags.isDefined(property)) {
+                throw new RaiseException(coreExceptions().nameErrorInstanceVariableNotDefined(name, object, this));
+            }
+
+            Shape newShape = shape.replaceProperty(property, PropertyFlags.asRemoved(property));
+            object.setShapeAndGrow(shape, newShape);
+        }
     }
 
     @CoreMethod(names = "instance_variables")
@@ -1398,12 +1483,12 @@ public abstract class KernelNodes {
             String feature = StringOperations.getString(featureString);
 
             // Pysch loads either the jar or the so - we need to intercept
-            if (feature.equals("psych.so") && callerIs("stdlib/psych.rb")) {
+            if (feature.equals("psych.so") && callerIs("mri/psych.rb")) {
                 feature = "truffle/psych.rb";
             }
 
             // TODO CS 1-Mar-15 ERB will use strscan if it's there, but strscan is not yet complete, so we need to hide it
-            if (feature.equals("strscan") && callerIs("stdlib/erb.rb")) {
+            if (feature.equals("strscan") && callerIs("mri/erb.rb")) {
                 throw new RaiseException(coreExceptions().loadErrorCannotLoad(feature, this));
             }
 
@@ -1445,13 +1530,12 @@ public abstract class KernelNodes {
                 featurePath = featureString;
             } else {
                 final Source source = getContext().getCallStack().getCallerFrameIgnoringSend().getCallNode().getEncapsulatingSourceSection().getSource();
-                String result;
-                if (source.getName() == null) {
-                    result = null;
-                } else {
-                    result = source.getName();
+
+                String sourcePath = source.getPath();
+                if (sourcePath == null) {
+                    // Use the filename passed to eval as basepath
+                    sourcePath = source.getName();
                 }
-                final String sourcePath = result;
 
                 if (sourcePath == null) {
                     throw new RaiseException(coreExceptions().loadError("cannot infer basepath", featureString, this));
@@ -1666,19 +1750,16 @@ public abstract class KernelNodes {
 
             final long start = System.currentTimeMillis();
 
-            long slept = context.getThreadManager().runUntilResult(currentNode, new BlockingAction<Long>() {
-                @Override
-                public Long block() throws InterruptedException {
-                    long now = System.currentTimeMillis();
-                    long slept = now - start;
+            long slept = context.getThreadManager().runUntilResult(currentNode, () -> {
+                long now = System.currentTimeMillis();
+                long slept1 = now - start;
 
-                    if (slept >= durationInMillis || Layouts.THREAD.getWakeUp(thread).getAndSet(false)) {
-                        return slept;
-                    }
-                    Thread.sleep(durationInMillis - slept);
-
-                    return System.currentTimeMillis() - start;
+                if (slept1 >= durationInMillis || Layouts.THREAD.getWakeUp(thread).getAndSet(false)) {
+                    return slept1;
                 }
+                Thread.sleep(durationInMillis - slept1);
+
+                return System.currentTimeMillis() - start;
             });
 
             return slept / 1000;
@@ -1772,7 +1853,7 @@ public abstract class KernelNodes {
 
             try {
                 return new PrintfCompiler(getContext(), this)
-                        .compile(format.toString(), Layouts.STRING.getRope(format).getBytes());
+                        .compile(Layouts.STRING.getRope(format).getBytes());
             } catch (InvalidFormatException e) {
                 throw new RaiseException(coreExceptions().argumentError(e.getMessage(), this));
             }
@@ -1831,7 +1912,7 @@ public abstract class KernelNodes {
 
     public abstract static class ToHexStringNode extends CoreMethodArrayArgumentsNode {
 
-        public abstract String executeToHexString(VirtualFrame frame, Object value);
+        public abstract String executeToHexString(Object value);
 
         @Specialization
         public String toHexString(int value) {
@@ -1866,13 +1947,13 @@ public abstract class KernelNodes {
             toHexStringNode = KernelNodesFactory.ToHexStringNodeFactory.create(null);
         }
 
-        public abstract DynamicObject executeToS(VirtualFrame frame, Object self);
+        public abstract DynamicObject executeToS(Object self);
 
         @Specialization
-        public DynamicObject toS(VirtualFrame frame, Object self) {
+        public DynamicObject toS(Object self) {
             String className = Layouts.MODULE.getFields(classNode.executeLogicalClass(self)).getName();
-            Object id = objectIDNode.executeObjectID(frame, self);
-            String hexID = toHexStringNode.executeToHexString(frame, id);
+            Object id = objectIDNode.executeObjectID(self);
+            String hexID = toHexStringNode.executeToHexString(id);
 
             final DynamicObject string = createString(formatToS(className, hexID));
             taintResultNode.maybeTaint(self, string);
@@ -1897,6 +1978,26 @@ public abstract class KernelNodes {
             super(context, sourceSection);
             isTaintedNode = IsTaintedNodeGen.create(context, sourceSection, null);
             writeTaintNode = WriteObjectFieldNodeGen.create(Layouts.TAINTED_IDENTIFIER);
+        }
+
+        @Specialization
+        public int untaint(int num) {
+            return num;
+        }
+
+        @Specialization
+        public long untaint(long num) {
+            return num;
+        }
+
+        @Specialization
+        public double untaint(double num) {
+            return num;
+        }
+
+        @Specialization
+        public boolean untaint(boolean bool) {
+            return bool;
         }
 
         @Specialization
