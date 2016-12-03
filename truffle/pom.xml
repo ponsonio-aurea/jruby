@@ -19,6 +19,7 @@ DO NOT MODIFIY - GENERATED CODE
   <properties>
     <polyglot.dump.readonly>true</polyglot.dump.readonly>
     <truffle.version>0.20</truffle.version>
+    <java.version>1.8</java.version>
     <maven.test.skip>true</maven.test.skip>
     <polyglot.dump.pom>pom.xml</polyglot.dump.pom>
     <jruby.basedir>${basedir}/..</jruby.basedir>
@@ -126,8 +127,8 @@ DO NOT MODIFIY - GENERATED CODE
           <verbose>false</verbose>
           <showWarnings>true</showWarnings>
           <showDeprecation>true</showDeprecation>
-          <source>1.8</source>
-          <target>1.8</target>
+          <source>${java.version}</source>
+          <target>${java.version}</target>
           <useIncrementalCompilation>false</useIncrementalCompilation>
         </configuration>
       </plugin>
@@ -276,6 +277,18 @@ DO NOT MODIFIY - GENERATED CODE
       <id>tck</id>
       <properties>
         <maven.test.skip>false</maven.test.skip>
+      </properties>
+    </profile>
+    <profile>
+      <id>java_version</id>
+      <activation>
+        <property>
+          <name>java.class.version</name>
+          <value>53.0</value>
+        </property>
+      </activation>
+      <properties>
+        <java.version>1.9</java.version>
       </properties>
     </profile>
   </profiles>

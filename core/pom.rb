@@ -172,8 +172,8 @@ project 'JRuby Core' do
           'compilerArgs' => { 'arg' => '-J-Xmx1G' },
           'showWarnings' => 'true',
           'showDeprecation' => 'true',
-          'source' => [ '${base.java.version}', '1.7' ],
-          'target' => [ '${base.javac.version}', '1.7' ],
+          'source' => '${base.java.version}',
+          'target' => '${base.javac.version}',
           'useIncrementalCompilation' =>  'false' ) do
     execute_goals( 'compile',
                    :id => 'anno',
@@ -388,12 +388,17 @@ project 'JRuby Core' do
 
   end
 
-  profile 'bootclasspath' do
-    activation do
-      jdk '1.8'
-    end
+  # TODO change to 1.9 when running with jdk9 as soon as core builds
+  #      with jdk9
+  { '52.0': '1.8', '53.0': '1.8' }.each do |class_version, java_version|
+    profile "#{class_version}" do
+      activation do
+        property name: 'java.class.version', value: class_version
+      end
 
-    properties 'bootclasspath': '-J-Xbootclasspath/p:${unsafe.jar}'
+      properties( 'base.java.version': java_version,
+                  'base.javac.version': java_version )
+    end
   end
 
   profile 'tzdata' do
